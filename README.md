@@ -1,2 +1,5 @@
-# rational_deduction.rs
-Rust implementation of the rational deduction algorithm
+# Rational Deduction
+
+_Rust implementation of the rational deduction algorithm_
+
+
