@@ -8,9 +8,9 @@ documentation = "https://docs.rs/rational_deduction"
 repository = "https://github.com/qdeduction/rational_deduction.rs"
 readme = "README.md"
 license = "ISC"
-keywords = ["deduction", "natural deduction"]
+keywords = ["deduction"]
 categories = [""]
-description = "Rust implementation of the rational deduction algorithm"
+description = "Rust implementation of the rational deduction algorithm."
 exclude = [""]
 
 [badges]
