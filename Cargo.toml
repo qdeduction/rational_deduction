@@ -12,6 +12,7 @@ keywords = ["deduction"]
 categories = [""]
 description = "Rust implementation of the rational deduction algorithm."
 exclude = [""]
+publish = false
 
 [badges]
 is-it-maintained-issue-resolution = { repository = "qdeduction/rational_deduction.rs" }

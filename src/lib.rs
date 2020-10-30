@@ -3,9 +3,7 @@
 
 //! The Rational Deduction Algorithm
 
-#![no_std]
-
-use core::iter::FromIterator;
+use {core::iter::FromIterator, std::vec::Vec};
 
 /// Expression Tree
 pub trait Expression
@@ -208,5 +206,85 @@ pub mod expr {
         fn next(&mut self) -> Option<Self::Item> {
             self.iter.next().map(E::into_expr)
         }
+    }
+}
+
+/// Compute the symmetric difference of two multisets.
+pub fn multiset_symmetric_difference<T, L>(
+    left: L,
+    right: Vec<T>,
+) -> (Vec<T>, impl Iterator<Item = T>)
+where
+    T: PartialEq,
+    L: IntoIterator<Item = T>,
+{
+    let right_len = right.len();
+    let mut matched_indices = Vec::<bool>::with_capacity(right_len);
+    matched_indices.resize(right_len, false);
+    (
+        left.into_iter()
+            .filter(|l| {
+                (&right).iter().enumerate().all(|(i, r)| {
+                    if *l == *r && !matched_indices[i] {
+                        matched_indices[i] = true;
+                        return false;
+                    }
+                    true
+                })
+            })
+            .collect(),
+        right
+            .into_iter()
+            .zip(matched_indices)
+            .filter_map(move |(r, m)| Some(r).filter(|_| !m)),
+    )
+}
+
+/// Ratio Trait
+pub trait Ratio<T, E>
+where
+    E: Default + IntoIterator<Item = T> + FromIterator<T>,
+    T: PartialEq,
+{
+    /// Create a new ratio from two base types.
+    fn new(top: E, bot: E) -> Self;
+
+    /// Get the top of the ratio.
+    fn top(&self) -> E;
+
+    /// Get the bottom of the ratio.
+    fn bot(&self) -> E;
+
+    /// Get the default ratio.
+    fn default() -> Self
+    where
+        Self: Sized,
+    {
+        Self::new(Default::default(), Default::default())
+    }
+
+    /// Compose two ratios according to the ratio monoid multiplication algorithm.
+    fn pair_compose(top: Self, bot: Self) -> Self
+    where
+        Self: Sized,
+    {
+        let (mut lower, upper) =
+            multiset_symmetric_difference(top.bot().into_iter(), bot.top().into_iter().collect());
+        let mut upper: Vec<_> = upper.collect();
+        upper.extend(top.top());
+        lower.extend(bot.bot());
+        Self::new(upper.into_iter().collect(), lower.into_iter().collect())
+    }
+
+    /// Fold a collection of ratios using `pair_compose`.
+    fn compose<I>(ratios: I) -> Self
+    where
+        Self: Sized,
+        I: IntoIterator<Item = Self>,
+    {
+        let mut iter = ratios.into_iter();
+        iter.next()
+            .map(move |r| iter.fold(r, Self::pair_compose))
+            .unwrap_or_else(Self::default)
     }
 }
