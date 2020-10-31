@@ -87,18 +87,6 @@ where
     }
 }
 
-impl<E> Default for Expr<E>
-where
-    E: Expression,
-{
-    /// Default Expr
-    ///
-    /// The default expression is the empty group expression.
-    fn default() -> Self {
-        Self::Group(E::Group::default())
-    }
-}
-
 impl<E> Expression for Expr<E>
 where
     E: Expression,
@@ -122,6 +110,18 @@ where
 
     fn from_group(group: <Self as Expression>::Group) -> Self {
         Self::Group(group.group)
+    }
+}
+
+impl<E> Default for Expr<E>
+where
+    E: Expression,
+{
+    /// Default Expr
+    ///
+    /// The default expression is the empty group expression.
+    fn default() -> Self {
+        <Self as Expression>::default()
     }
 }
 
@@ -209,6 +209,38 @@ pub mod expr {
     }
 }
 
+/// Substitution Trait
+pub trait Substitution<E>
+where
+    E: Expression,
+{
+    /// Term iterator type 
+    type TermIter: Iterator<Item = (E::Atom, E)>;
+
+    /// Get the subtitution term iterator.
+    fn terms(&self) -> Self::TermIter;
+
+    /// Compute the subtitution on the expression.
+    fn substitute(&self, expr: E) -> E
+    where
+        E::Atom: PartialEq,
+    {
+        E::from_expr(match expr.into_expr() {
+            Expr::Atom(atom) => {
+                for (t, e) in self.terms() {
+                    if atom == t {
+                        return e;
+                    }
+                }
+                Expr::Atom(atom)
+            }
+            Expr::Group(group) => {
+                Expr::Group(group.into_iter().map(move |e| self.substitute(e)).collect())
+            }
+        })
+    }
+}
+
 /// Compute the symmetric difference of two multisets.
 pub fn multiset_symmetric_difference<T, L>(
     left: L,
@@ -243,7 +275,7 @@ where
 /// Ratio Trait
 pub trait Ratio<T, E>
 where
-    E: Default + IntoIterator<Item = T> + FromIterator<T>,
+    E: Default + Extend<T> + IntoIterator<Item = T> + FromIterator<T>,
     T: PartialEq,
 {
     /// Create a new ratio from two base types.
@@ -270,7 +302,7 @@ where
     {
         let (mut lower, upper) =
             multiset_symmetric_difference(top.bot().into_iter(), bot.top().into_iter().collect());
-        let mut upper: Vec<_> = upper.collect();
+        let mut upper: E = upper.collect();
         upper.extend(top.top());
         lower.extend(bot.bot());
         Self::new(upper.into_iter().collect(), lower.into_iter().collect())
@@ -288,3 +320,6 @@ where
             .unwrap_or_else(Self::default)
     }
 }
+
+/// Composition Trait
+pub trait Composition {}
