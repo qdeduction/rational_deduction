@@ -222,7 +222,7 @@ where
     fn on_groups(&self, group: A::Group) -> B::Group {
         group.into_iter().map(move |e| self.on_exprs(e)).collect()
     }
-    
+
     /// Compute the map on expressions.
     fn on_exprs(&self, expr: A) -> B {
         match expr.cases() {
