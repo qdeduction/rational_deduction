@@ -27,7 +27,7 @@ where
     /// Convert to [canonical enumeration]
     ///
     /// [canonical enumeration]: enum.Expr.html
-    fn into_expr(self) -> Expr<Self>;
+    fn cases(self) -> Expr<Self>;
 
     /// Build an `Expression` from an atomic element.
     fn from_atom(atom: Self::Atom) -> Self;
@@ -97,7 +97,7 @@ where
 
     type GroupIter = expr::ExprGroupIter<E>;
 
-    fn into_expr(self) -> Expr<Self> {
+    fn cases(self) -> Expr<Self> {
         match self {
             Expr::Atom(atom) => Expr::Atom(atom),
             Expr::Group(group) => Expr::Group(expr::ExprGroup { group }),
@@ -204,40 +204,54 @@ pub mod expr {
         type Item = Expr<E>;
 
         fn next(&mut self) -> Option<Self::Item> {
-            self.iter.next().map(E::into_expr)
+            self.iter.next().map(E::cases)
+        }
+    }
+}
+
+/// Map Trait
+pub trait Map<A, B>
+where
+    A: Expression,
+    B: Expression,
+{
+    /// Compute the map on atoms.
+    fn on_atoms(&self, atom: A::Atom) -> B::Atom;
+
+    /// Compute the map on groups.
+    fn on_groups(&self, group: A::Group) -> B::Group {
+        group.into_iter().map(move |e| self.on_exprs(e)).collect()
+    }
+    
+    /// Compute the map on expressions.
+    fn on_exprs(&self, expr: A) -> B {
+        match expr.cases() {
+            Expr::Atom(atom) => B::from_atom(self.on_atoms(atom)),
+            Expr::Group(group) => B::from_group(self.on_groups(group)),
         }
     }
 }
 
 /// Substitution Trait
-pub trait Substitution<E>
+pub trait Substitution<A, B>
 where
-    E: Expression,
+    A: Expression,
+    B: Expression,
 {
-    /// Term iterator type 
-    type TermIter: Iterator<Item = (E::Atom, E)>;
+    /// Compute the substitution on atoms.
+    fn on_atoms(&self, atom: A::Atom) -> B;
 
-    /// Get the subtitution term iterator.
-    fn terms(&self) -> Self::TermIter;
+    /// Compute the substitution on groups.
+    fn on_groups(&self, group: A::Group) -> B::Group {
+        group.into_iter().map(move |e| self.on_exprs(e)).collect()
+    }
 
-    /// Compute the subtitution on the expression.
-    fn substitute(&self, expr: E) -> E
-    where
-        E::Atom: PartialEq,
-    {
-        E::from_expr(match expr.into_expr() {
-            Expr::Atom(atom) => {
-                for (t, e) in self.terms() {
-                    if atom == t {
-                        return e;
-                    }
-                }
-                Expr::Atom(atom)
-            }
-            Expr::Group(group) => {
-                Expr::Group(group.into_iter().map(move |e| self.substitute(e)).collect())
-            }
-        })
+    /// Compute the substitution on expressions.
+    fn on_exprs(&self, expr: A) -> B {
+        match expr.cases() {
+            Expr::Atom(atom) => self.on_atoms(atom),
+            Expr::Group(group) => B::from_group(self.on_groups(group)),
+        }
     }
 }
 
