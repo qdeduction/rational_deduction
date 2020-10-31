@@ -232,6 +232,59 @@ where
     }
 }
 
+/// Map from an Iterator
+pub trait MapIter<E>
+where
+    E: Expression,
+{
+    /// Map term iterator
+    type TermIter: Iterator<Item = (E::Atom, E::Atom)>;
+
+    /// Get the map terms.
+    fn terms(&self) -> Self::TermIter;
+
+    /// Compute the map on atoms.
+    fn on_atoms(&self, atom: E::Atom) -> E::Atom
+    where
+        E::Atom: PartialEq,
+    {
+        self.terms()
+            .find(|(a, _)| *a == atom)
+            .map(move |(_, e)| e)
+            .unwrap_or(atom)
+    }
+
+    /// Compute the map on groups.
+    fn on_groups(&self, group: E::Group) -> E::Group
+    where
+        E::Atom: PartialEq,
+    {
+        group.into_iter().map(move |e| self.on_exprs(e)).collect()
+    }
+
+    /// Compute the map on expressions.
+    fn on_exprs(&self, expr: E) -> E
+    where
+        E::Atom: PartialEq,
+    {
+        match expr.cases() {
+            Expr::Atom(atom) => E::from_atom(self.on_atoms(atom)),
+            Expr::Group(group) => E::from_group(self.on_groups(group)),
+        }
+    }
+}
+
+impl<E, M> Map<E, E> for M
+where
+    E: Expression,
+    E::Atom: PartialEq,
+    M: MapIter<E>,
+{
+    fn on_atoms(&self, atom: E::Atom) -> E::Atom {
+        self.on_atoms(atom)
+    }
+}
+
 /// Substitution Trait
 pub trait Substitution<A, B>
 where
@@ -252,6 +305,59 @@ where
             Expr::Atom(atom) => self.on_atoms(atom),
             Expr::Group(group) => B::from_group(self.on_groups(group)),
         }
+    }
+}
+
+/// Substitution from an Iterator
+pub trait SubstitutionIter<E>
+where
+    E: Expression,
+{
+    /// Substitution term iterator
+    type TermIter: Iterator<Item = (E::Atom, E)>;
+
+    /// Get the substitution terms.
+    fn terms(&self) -> Self::TermIter;
+
+    /// Compute the substitution on atoms.
+    fn on_atoms(&self, atom: E::Atom) -> E
+    where
+        E::Atom: PartialEq,
+    {
+        self.terms()
+            .find(|(a, _)| *a == atom)
+            .map(move |(_, e)| e)
+            .unwrap_or_else(move || E::from_atom(atom))
+    }
+
+    /// Compute the substitution on groups.
+    fn on_groups(&self, group: E::Group) -> E::Group
+    where
+        E::Atom: PartialEq,
+    {
+        group.into_iter().map(move |e| self.on_exprs(e)).collect()
+    }
+
+    /// Compute the substitution on expressions.
+    fn on_exprs(&self, expr: E) -> E
+    where
+        E::Atom: PartialEq,
+    {
+        match expr.cases() {
+            Expr::Atom(atom) => self.on_atoms(atom),
+            Expr::Group(group) => E::from_group(self.on_groups(group)),
+        }
+    }
+}
+
+impl<E, S> Substitution<E, E> for S
+where
+    E: Expression,
+    E::Atom: PartialEq,
+    S: SubstitutionIter<E>,
+{
+    fn on_atoms(&self, atom: E::Atom) -> E {
+        self.on_atoms(atom)
     }
 }
 
@@ -341,24 +447,19 @@ pub trait Composition<E>
 where
     E: Expression + PartialEq,
 {
-    ///
-    ///
+    /// Composition term ratio type.
     type Ratio: Ratio<E, E::Group>;
 
-    ///
-    ///
+    /// Composition term substitution type.
     type Substitution: Substitution<E, E>;
 
-    ///
-    ///
+    /// Composition term iterator type.
     type TermIter: Iterator<Item = (Self::Ratio, Self::Substitution)>;
 
-    ///
-    ///
+    /// Get composition terms.
     fn terms(&self) -> Self::TermIter;
 
-    ///
-    ///
+    /// Evaluate the composition.
     fn eval(&self) -> Self::Ratio {
         Ratio::compose(self.terms().map(move |(r, s)| {
             Ratio::new(
