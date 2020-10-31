@@ -49,6 +49,18 @@ where
     fn default() -> Self {
         Self::from_expr(Default::default())
     }
+
+    /// Check if expression is an atomic expression.
+    #[must_use]
+    fn is_atom(self) -> bool {
+        self.cases().is_atom()
+    }
+
+    /// Check if expression is a grouped expression.
+    #[must_use]
+    fn is_group(self) -> bool {
+        self.cases().is_group()
+    }
 }
 
 /// Canonical Concrete Expression Type
@@ -68,7 +80,7 @@ impl<E> Expr<E>
 where
     E: Expression,
 {
-    /// Check if expression is an atomic expression
+    /// Check if expression is an atomic expression.
     #[must_use]
     pub fn is_atom(&self) -> bool {
         match self {
@@ -77,7 +89,7 @@ where
         }
     }
 
-    /// Check if expression is a grouped expression
+    /// Check if expression is a grouped expression.
     #[must_use]
     pub fn is_group(&self) -> bool {
         match self {
