@@ -287,19 +287,18 @@ where
 }
 
 /// Ratio Trait
-pub trait Ratio<T, E>
+pub trait Ratio<T, V>
 where
-    E: Default + Extend<T> + IntoIterator<Item = T> + FromIterator<T>,
-    T: PartialEq,
+    V: Default + Extend<T> + IntoIterator<Item = T> + FromIterator<T>,
 {
     /// Create a new ratio from two base types.
-    fn new(top: E, bot: E) -> Self;
+    fn new(top: V, bot: V) -> Self;
 
     /// Get the top of the ratio.
-    fn top(&self) -> E;
+    fn top(&self) -> V;
 
     /// Get the bottom of the ratio.
-    fn bot(&self) -> E;
+    fn bot(&self) -> V;
 
     /// Get the default ratio.
     fn default() -> Self
@@ -313,10 +312,11 @@ where
     fn pair_compose(top: Self, bot: Self) -> Self
     where
         Self: Sized,
+        T: PartialEq,
     {
         let (mut lower, upper) =
             multiset_symmetric_difference(top.bot().into_iter(), bot.top().into_iter().collect());
-        let mut upper: E = upper.collect();
+        let mut upper: V = upper.collect();
         upper.extend(top.top());
         lower.extend(bot.bot());
         Self::new(upper.into_iter().collect(), lower.into_iter().collect())
@@ -327,6 +327,7 @@ where
     where
         Self: Sized,
         I: IntoIterator<Item = Self>,
+        T: PartialEq,
     {
         let mut iter = ratios.into_iter();
         iter.next()
@@ -336,4 +337,34 @@ where
 }
 
 /// Composition Trait
-pub trait Composition {}
+pub trait Composition<E>
+where
+    E: Expression + PartialEq,
+{
+    ///
+    ///
+    type Ratio: Ratio<E, E::Group>;
+
+    ///
+    ///
+    type Substitution: Substitution<E, E>;
+
+    ///
+    ///
+    type TermIter: Iterator<Item = (Self::Ratio, Self::Substitution)>;
+
+    ///
+    ///
+    fn terms(&self) -> Self::TermIter;
+
+    ///
+    ///
+    fn eval(&self) -> Self::Ratio {
+        Ratio::compose(self.terms().map(move |(r, s)| {
+            Ratio::new(
+                r.top().into_iter().map(|e| s.on_exprs(e)).collect(),
+                r.bot().into_iter().map(|e| s.on_exprs(e)).collect(),
+            )
+        }))
+    }
+}
