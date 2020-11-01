@@ -46,23 +46,27 @@ where
     }
 
     /// Get default `Expression` from canonical enumeration
+    #[inline]
     fn default() -> Self {
         Self::from_expr(Default::default())
     }
 
     /// Check if expression is an atomic expression.
     #[must_use]
+    #[inline]
     fn is_atom(self) -> bool {
         self.cases().is_atom()
     }
 
     /// Check if expression is a grouped expression.
     #[must_use]
+    #[inline]
     fn is_group(self) -> bool {
         self.cases().is_group()
     }
 
     /// Perform mapping on expression from atomic mapping function.
+    #[inline]
     fn map<E, F>(self, f: F) -> E
     where
         E: Expression,
@@ -72,6 +76,7 @@ where
     }
 
     /// Perform substitution on expression from atomic substitution function.
+    #[inline]
     fn substitute<E, F>(self, f: F) -> E
     where
         E: Expression,
@@ -100,12 +105,14 @@ where
 {
     /// Check if expression is an atomic expression.
     #[must_use]
+    #[inline]
     pub fn is_atom(&self) -> bool {
         matches!(self, Expr::Atom(_))
     }
 
     /// Check if expression is a grouped expression.
     #[must_use]
+    #[inline]
     pub fn is_group(&self) -> bool {
         matches!(self, Expr::Group(_))
     }
@@ -128,10 +135,12 @@ where
         }
     }
 
+    #[inline]
     fn from_atom(atom: <Self as Expression>::Atom) -> Self {
         Self::Atom(atom)
     }
 
+    #[inline]
     fn from_group(group: <Self as Expression>::Group) -> Self {
         Self::Group(group.group)
     }
@@ -452,7 +461,9 @@ where
         Self::new(upper.into_iter().collect(), lower.into_iter().collect())
     }
 
-    /// Fold a collection of ratios using `pair_compose`.
+    /// Fold a collection of ratios using [`pair_compose`].
+    ///
+    /// [`pair_compose`]: trait.Ratio.html#method.pair_compose
     fn compose<I>(ratios: I) -> Self
     where
         Self: Sized,
