@@ -61,6 +61,24 @@ where
     fn is_group(self) -> bool {
         self.cases().is_group()
     }
+
+    /// Perform mapping on expression from atomic mapping function.
+    fn map<E, F>(self, f: F) -> E
+    where
+        E: Expression,
+        F: Fn(Self::Atom) -> E::Atom,
+    {
+        Map::<Self, E>::on_exprs(&f, self)
+    }
+
+    /// Perform substitution on expression from atomic substitution function.
+    fn substitute<E, F>(self, f: F) -> E
+    where
+        E: Expression,
+        F: Fn(Self::Atom) -> E,
+    {
+        Substitution::<Self, E>::on_exprs(&f, self)
+    }
 }
 
 /// Canonical Concrete Expression Type
@@ -244,6 +262,17 @@ where
     }
 }
 
+impl<A, B, F> Map<A, B> for F
+where
+    A: Expression,
+    B: Expression,
+    F: Fn(A::Atom) -> B::Atom,
+{
+    fn on_atoms(&self, atom: A::Atom) -> B::Atom {
+        self(atom)
+    }
+}
+
 /// Map from an Iterator
 pub trait MapIter<E>
 where
@@ -286,17 +315,6 @@ where
     }
 }
 
-impl<E, M> Map<E, E> for M
-where
-    E: Expression,
-    E::Atom: PartialEq,
-    M: MapIter<E>,
-{
-    fn on_atoms(&self, atom: E::Atom) -> E::Atom {
-        self.on_atoms(atom)
-    }
-}
-
 /// Substitution Trait
 pub trait Substitution<A, B>
 where
@@ -317,6 +335,17 @@ where
             Expr::Atom(atom) => self.on_atoms(atom),
             Expr::Group(group) => B::from_group(self.on_groups(group)),
         }
+    }
+}
+
+impl<A, B, F> Substitution<A, B> for F
+where
+    A: Expression,
+    B: Expression,
+    F: Fn(A::Atom) -> B,
+{
+    fn on_atoms(&self, atom: A::Atom) -> B {
+        self(atom)
     }
 }
 
@@ -359,17 +388,6 @@ where
             Expr::Atom(atom) => self.on_atoms(atom),
             Expr::Group(group) => E::from_group(self.on_groups(group)),
         }
-    }
-}
-
-impl<E, S> Substitution<E, E> for S
-where
-    E: Expression,
-    E::Atom: PartialEq,
-    S: SubstitutionIter<E>,
-{
-    fn on_atoms(&self, atom: E::Atom) -> E {
-        self.on_atoms(atom)
     }
 }
 
