@@ -101,19 +101,13 @@ where
     /// Check if expression is an atomic expression.
     #[must_use]
     pub fn is_atom(&self) -> bool {
-        match self {
-            Expr::Atom(_) => true,
-            _ => false,
-        }
+        matches!(self, Expr::Atom(_))
     }
 
     /// Check if expression is a grouped expression.
     #[must_use]
     pub fn is_group(&self) -> bool {
-        match self {
-            Expr::Group(_) => true,
-            _ => false,
-        }
+        matches!(self, Expr::Group(_))
     }
 }
 
