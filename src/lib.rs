@@ -433,18 +433,26 @@ where
     /// Create a new ratio from two base types.
     fn new(top: V, bot: V) -> Self;
 
-    /// Get the top of the ratio.
-    fn top(&self) -> V;
+    /// Convert to [canonical ratio type]
+    ///
+    /// [canonical ratio type]: struct.RatioPair.html
+    fn cases(self) -> RatioPair<T, V>;
 
-    /// Get the bottom of the ratio.
-    fn bot(&self) -> V;
+    #[inline]
+    fn from_pair(pair: RatioPair<T, V>) -> Self
+    where
+        Self: Sized,
+    {
+        Self::new(pair.top, pair.bot)
+    }
 
     /// Get the default ratio.
+    #[inline]
     fn default() -> Self
     where
         Self: Sized,
     {
-        Self::new(Default::default(), Default::default())
+        Self::from_pair(Default::default())
     }
 
     /// Compose two ratios according to the ratio monoid multiplication algorithm.
@@ -453,11 +461,13 @@ where
         Self: Sized,
         T: PartialEq,
     {
+        let top = top.cases();
+        let bot = bot.cases();
         let (mut lower, upper) =
-            multiset_symmetric_difference(top.bot().into_iter(), bot.top().into_iter().collect());
+            multiset_symmetric_difference(top.bot, bot.top.into_iter().collect());
         let mut upper: V = upper.collect();
-        upper.extend(top.top());
-        lower.extend(bot.bot());
+        upper.extend(top.top);
+        lower.extend(bot.bot);
         Self::new(upper.into_iter().collect(), lower.into_iter().collect())
     }
 
@@ -474,6 +484,46 @@ where
         iter.next()
             .map(move |r| iter.fold(r, Self::pair_compose))
             .unwrap_or_else(Self::default)
+    }
+}
+
+/// Canonical Ratio Type
+pub struct RatioPair<T, V>
+where
+    V: Default + Extend<T> + IntoIterator<Item = T> + FromIterator<T>,
+{
+    /// Top of the ratio
+    pub top: V,
+
+    /// Bottom of the ratio
+    pub bot: V,
+}
+
+impl<T, V> Ratio<T, V> for RatioPair<T, V>
+where
+    V: Default + Extend<T> + IntoIterator<Item = T> + FromIterator<T>,
+{
+    #[inline]
+    fn new(top: V, bot: V) -> Self {
+        Self { top, bot }
+    }
+
+    #[inline]
+    fn cases(self) -> Self {
+        self
+    }
+}
+
+impl<T, V> Default for RatioPair<T, V>
+where
+    V: Default + Extend<T> + IntoIterator<Item = T> + FromIterator<T>,
+{
+    #[inline]
+    fn default() -> Self {
+        Self {
+            top: Default::default(),
+            bot: Default::default(),
+        }
     }
 }
 
@@ -497,9 +547,10 @@ where
     /// Evaluate the composition.
     fn eval(&self) -> Self::Ratio {
         Ratio::compose(self.terms().map(move |(r, s)| {
+            let r = r.cases();
             Ratio::new(
-                r.top().into_iter().map(|e| s.on_exprs(e)).collect(),
-                r.bot().into_iter().map(|e| s.on_exprs(e)).collect(),
+                r.top.into_iter().map(|e| s.on_exprs(e)).collect(),
+                r.bot.into_iter().map(|e| s.on_exprs(e)).collect(),
             )
         }))
     }
