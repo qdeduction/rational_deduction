@@ -590,6 +590,7 @@ where
 }
 
 /// Canonical Ratio Type
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct RatioPair<T, V>
 where
     V: Default + Extend<T> + IntoIterator<Item = T> + FromIterator<T>,
