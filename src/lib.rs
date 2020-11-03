@@ -68,18 +68,30 @@ where
         self.cases().is_group()
     }
 
+    /// Convert from `Expression` to `Option<Self::Atom>`.
+    #[inline]
+    fn atom(self) -> Option<Self::Atom> {
+        self.cases().atom()
+    }
+
+    /// Convert from `Expression` to `Option<Self::Group>`.
+    #[inline]
+    fn group(self) -> Option<Self::Group> {
+        self.cases().group()
+    }
+
     /// Unwrap expression into atomic expression.
     #[must_use]
     #[inline]
-    fn atom(self) -> Self::Atom {
-        self.cases().atom()
+    fn unwrap_atom(self) -> Self::Atom {
+        self.cases().unwrap_atom()
     }
 
     /// Unwrap expression into grouped expression.
     #[must_use]
     #[inline]
-    fn group(self) -> Self::Group {
-        self.cases().group()
+    fn unwrap_group(self) -> Self::Group {
+        self.cases().unwrap_group()
     }
 
     /// Perform mapping on expression from atomic mapping function.
@@ -134,23 +146,41 @@ where
         matches!(self, Expr::Group(_))
     }
 
+    /// Convert from `Expr` to `Option<E::Atom>`.
+    #[inline]
+    pub fn atom(self) -> Option<E::Atom> {
+        match self {
+            Expr::Atom(atom) => Some(atom),
+            _ => None,
+        }
+    }
+
+    /// Convert from `Expr` to `Option<E::Group>`.
+    #[inline]
+    pub fn group(self) -> Option<E::Group> {
+        match self {
+            Expr::Group(group) => Some(group),
+            _ => None,
+        }
+    }
+
     /// Unwrap expression into atomic expression.
     #[must_use]
     #[inline]
-    fn atom(self) -> E::Atom {
+    pub fn unwrap_atom(self) -> E::Atom {
         match self {
             Expr::Atom(atom) => atom,
-            _ => panic!(),
+            _ => panic!("called `Expr::atom()` on a `Group` value"),
         }
     }
 
     /// Unwrap expression into grouped expression.
     #[must_use]
     #[inline]
-    fn group(self) -> E::Group {
+    pub fn unwrap_group(self) -> E::Group {
         match self {
             Expr::Group(group) => group,
-            _ => panic!(),
+            _ => panic!("called `Expr::group()` on an `Atom` value"),
         }
     }
 }
@@ -165,6 +195,7 @@ where
 
     type GroupIter = expr::ExprGroupIter<E>;
 
+    #[inline]
     fn cases(self) -> Expr<Self> {
         match self {
             Expr::Atom(atom) => Expr::Atom(atom),
@@ -604,11 +635,9 @@ where
             Expr::Atom(_) => Err(RatioPairFromExprError::NotGroup),
             Expr::Group(group) => {
                 let mut group = group.into_iter();
-                let top = group.next();
-                let bot = group.next();
-                if top.is_some() && bot.is_some() && group.next().is_none() {
-                    match top.unwrap().cases() {
-                        Expr::Group(top) => match bot.unwrap().cases() {
+                if let (Some(top), Some(bot), None) = (group.next(), group.next(), group.next()) {
+                    match top.cases() {
+                        Expr::Group(top) => match bot.cases() {
                             Expr::Group(bot) => Ok(RatioPair { top, bot }),
                             _ => Err(RatioPairFromExprError::MissingBotGroup),
                         },
