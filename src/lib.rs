@@ -94,24 +94,24 @@ where
         self.cases().unwrap_group()
     }
 
-    /// Perform mapping on expression from atomic mapping function.
+    /// Perform a mapping over the expression.
     #[inline]
-    fn map<E, F>(self, f: F) -> E
+    fn map<E, M>(self, m: &M) -> E
     where
         E: Expression,
-        F: Fn(Self::Atom) -> E::Atom,
+        M: Map<Self, E>,
     {
-        Map::<Self, E>::on_exprs(&f, self)
+        m.on_exprs(self)
     }
 
-    /// Perform substitution on expression from atomic substitution function.
+    /// Perform a substitution over the expression.
     #[inline]
-    fn substitute<E, F>(self, f: F) -> E
+    fn substitute<E, S>(self, s: &S) -> E
     where
         E: Expression,
-        F: Fn(Self::Atom) -> E,
+        S: Substitution<Self, E>,
     {
-        Substitution::<Self, E>::on_exprs(&f, self)
+        s.on_exprs(self)
     }
 }
 
@@ -553,6 +553,40 @@ where
             .map(move |r| iter.fold(r, Self::pair_compose))
             .unwrap_or_else(Self::default)
     }
+
+    /// Perform a mapping over the ratio.
+    fn map<RT, RV, R, M>(self, m: &M) -> R
+    where
+        Self: Sized,
+        T: Expression,
+        RT: Expression,
+        RV: Default + Extend<RT> + IntoIterator<Item = RT> + FromIterator<RT>,
+        R: Ratio<RT, RV>,
+        M: Map<T, RT>,
+    {
+        let ratio = self.cases();
+        Ratio::new(
+            ratio.top.into_iter().map(|e| m.on_exprs(e)).collect(),
+            ratio.bot.into_iter().map(|e| m.on_exprs(e)).collect(),
+        )
+    }
+
+    /// Perform a substitution over the ratio.
+    fn substitute<RT, RV, R, S>(self, s: &S) -> R
+    where
+        Self: Sized,
+        T: Expression,
+        RT: Expression,
+        RV: Default + Extend<RT> + IntoIterator<Item = RT> + FromIterator<RT>,
+        R: Ratio<RT, RV>,
+        S: Substitution<T, RT>,
+    {
+        let ratio = self.cases();
+        Ratio::new(
+            ratio.top.into_iter().map(|e| s.on_exprs(e)).collect(),
+            ratio.bot.into_iter().map(|e| s.on_exprs(e)).collect(),
+        )
+    }
 }
 
 /// Canonical Ratio Type
@@ -565,6 +599,20 @@ where
 
     /// Bottom of the ratio
     pub bot: V,
+}
+
+impl<T, V> RatioPair<T, V>
+where
+    V: Default + Extend<T> + IntoIterator<Item = T> + FromIterator<T>,
+{
+    /// Reverse a `RatioPair`.
+    #[inline]
+    pub fn reverse(self) -> Self {
+        Self {
+            top: self.bot,
+            bot: self.top,
+        }
+    }
 }
 
 impl<T, V> Ratio<T, V> for RatioPair<T, V>
@@ -671,12 +719,6 @@ where
 
     /// Evaluate the composition.
     fn eval(&self) -> Self::Ratio {
-        Ratio::compose(self.terms().map(move |(r, s)| {
-            let r = r.cases();
-            Ratio::new(
-                r.top.into_iter().map(|e| s.on_exprs(e)).collect(),
-                r.bot.into_iter().map(|e| s.on_exprs(e)).collect(),
-            )
-        }))
+        Ratio::compose(self.terms().map(move |(r, s)| r.substitute(&s)))
     }
 }
