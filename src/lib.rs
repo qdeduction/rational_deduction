@@ -669,6 +669,9 @@ pub enum RatioPairFromExprError {
 
     /// The bot element of the group is not a group.
     MissingBotGroup,
+
+    /// The top and bot element of the group are not groups.
+    MissingTopBotGroup,
 }
 
 impl<E> TryFrom<Expr<E>> for RatioPair<E, E::Group>
@@ -683,12 +686,11 @@ where
             Expr::Group(group) => {
                 let mut group = group.into_iter();
                 if let (Some(top), Some(bot), None) = (group.next(), group.next(), group.next()) {
-                    match top.cases() {
-                        Expr::Group(top) => match bot.cases() {
-                            Expr::Group(bot) => Ok(RatioPair { top, bot }),
-                            _ => Err(RatioPairFromExprError::MissingBotGroup),
-                        },
-                        _ => Err(RatioPairFromExprError::MissingTopGroup),
+                    match (top.cases(), bot.cases()) {
+                        (Expr::Group(top), Expr::Group(bot)) => Ok(RatioPair { top, bot }),
+                        (_, Expr::Group(_)) => Err(RatioPairFromExprError::MissingTopGroup),
+                        (Expr::Group(_), _) => Err(RatioPairFromExprError::MissingBotGroup),
+                        _ => Err(RatioPairFromExprError::MissingTopBotGroup),
                     }
                 } else {
                     Err(RatioPairFromExprError::BadGroupShape)
