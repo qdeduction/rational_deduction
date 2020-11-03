@@ -3,7 +3,10 @@
 
 //! The Rational Deduction Algorithm
 
-use {core::iter::FromIterator, std::vec::Vec};
+use {
+    core::{convert::TryFrom, iter::FromIterator},
+    std::vec::Vec,
+};
 
 /// Expression Tree
 pub trait Expression
@@ -65,6 +68,20 @@ where
         self.cases().is_group()
     }
 
+    /// Unwrap expression into atomic expression.
+    #[must_use]
+    #[inline]
+    fn atom(self) -> Self::Atom {
+        self.cases().atom()
+    }
+
+    /// Unwrap expression into grouped expression.
+    #[must_use]
+    #[inline]
+    fn group(self) -> Self::Group {
+        self.cases().group()
+    }
+
     /// Perform mapping on expression from atomic mapping function.
     #[inline]
     fn map<E, F>(self, f: F) -> E
@@ -115,6 +132,26 @@ where
     #[inline]
     pub fn is_group(&self) -> bool {
         matches!(self, Expr::Group(_))
+    }
+
+    /// Unwrap expression into atomic expression.
+    #[must_use]
+    #[inline]
+    fn atom(self) -> E::Atom {
+        match self {
+            Expr::Atom(atom) => atom,
+            _ => panic!(),
+        }
+    }
+
+    /// Unwrap expression into grouped expression.
+    #[must_use]
+    #[inline]
+    fn group(self) -> E::Group {
+        match self {
+            Expr::Group(group) => group,
+            _ => panic!(),
+        }
     }
 }
 
@@ -523,6 +560,64 @@ where
         Self {
             top: Default::default(),
             bot: Default::default(),
+        }
+    }
+}
+
+impl<E, V> From<RatioPair<E, V>> for Expr<E>
+where
+    E: Expression<Group = V>,
+    V: Default + Extend<E> + IntoIterator<Item = E> + FromIterator<E>,
+{
+    fn from(t: RatioPair<E, V>) -> Self {
+        let mut group = V::default();
+        group.extend(Some(E::from_group(t.top)));
+        group.extend(Some(E::from_group(t.bot)));
+        Expr::Group(group)
+    }
+}
+
+/// Conversion from `Expr` to `RatioPair` Error Type
+pub enum RatioPairFromExprError {
+    /// The expression is not a group.
+    NotGroup,
+
+    /// The expression has the wrong group shape.
+    BadGroupShape,
+
+    /// The top element of the group is not a group.
+    MissingTopGroup,
+
+    /// The bot element of the group is not a group.
+    MissingBotGroup,
+}
+
+impl<E, V> TryFrom<Expr<E>> for RatioPair<E, V>
+where
+    E: Expression<Group = V>,
+    V: Default + Extend<E> + IntoIterator<Item = E> + FromIterator<E>,
+{
+    type Error = RatioPairFromExprError;
+
+    fn try_from(t: Expr<E>) -> Result<Self, Self::Error> {
+        match t {
+            Expr::Atom(_) => Err(RatioPairFromExprError::NotGroup),
+            Expr::Group(group) => {
+                let mut group = group.into_iter();
+                let top = group.next();
+                let bot = group.next();
+                if top.is_some() && bot.is_some() && group.next().is_none() {
+                    match top.unwrap().cases() {
+                        Expr::Group(top) => match bot.unwrap().cases() {
+                            Expr::Group(bot) => Ok(RatioPair { top, bot }),
+                            _ => Err(RatioPairFromExprError::MissingBotGroup),
+                        },
+                        _ => Err(RatioPairFromExprError::MissingTopGroup),
+                    }
+                } else {
+                    Err(RatioPairFromExprError::BadGroupShape)
+                }
+            }
         }
     }
 }
