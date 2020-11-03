@@ -4,7 +4,10 @@
 //! The Rational Deduction Algorithm
 
 use {
-    core::{convert::TryFrom, iter::FromIterator},
+    core::{
+        convert::{identity, TryFrom},
+        iter::FromIterator,
+    },
     std::vec::Vec,
 };
 
@@ -17,15 +20,7 @@ where
     type Atom;
 
     /// Group expression type
-    type Group: Default
-        + Extend<Self>
-        + IntoIterator<Item = Self, IntoIter = Self::GroupIter>
-        + FromIterator<Self>;
-
-    /// Iterator type to read from [`Group`]
-    ///
-    /// [`Group`]: #associatedtype.Group
-    type GroupIter: Iterator<Item = Self>;
+    type Group: Default + Extend<Self> + IntoIterator<Item = Self> + FromIterator<Self>;
 
     /// Convert to [canonical enumeration]
     ///
@@ -115,6 +110,19 @@ where
     }
 }
 
+/// Canonical Expression Reference Container Type
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum ExprRef<'e, E>
+where
+    E: 'e + Expression,
+{
+    /// Atomic element
+    Atom(&'e E::Atom),
+
+    /// Grouped expression
+    Group(&'e E::Group),
+}
+
 /// Canonical Concrete Expression Type
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum Expr<E>
@@ -185,21 +193,34 @@ where
     }
 }
 
+impl<E> Expr<Expr<E>>
+where
+    E: Expression,
+{
+    /// Monadic join for `Expr`.
+    pub fn join(self) -> Expr<E> {
+        match self {
+            Expr::Atom(atom) => Expr::Atom(atom),
+            Expr::Group(group) => Expr::from_group(group),
+        }
+    }
+}
+
 impl<E> Expression for Expr<E>
 where
     E: Expression,
 {
     type Atom = E::Atom;
 
-    type Group = expr::ExprGroup<E>;
+    type Group = ExprGroup<E>;
 
-    type GroupIter = expr::ExprGroupIter<E>;
+    // type GroupIter = ExprGroupIter<E>;
 
     #[inline]
     fn cases(self) -> Expr<Self> {
         match self {
             Expr::Atom(atom) => Expr::Atom(atom),
-            Expr::Group(group) => Expr::Group(expr::ExprGroup { group }),
+            Expr::Group(group) => Expr::Group(ExprGroup { group }),
         }
     }
 
@@ -226,88 +247,100 @@ where
     }
 }
 
-/// Expression Module
-pub mod expr {
-    use super::*;
+/// Expression Group Container
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct ExprGroup<E>
+where
+    E: Expression,
+{
+    /// Inner group
+    pub group: E::Group,
+}
 
-    /// Expression Group Container
-    pub struct ExprGroup<E>
-    where
-        E: Expression,
-    {
-        pub group: E::Group,
-    }
-
-    impl<E> Default for ExprGroup<E>
-    where
-        E: Expression,
-    {
-        fn default() -> Self {
-            ExprGroup {
-                group: E::Group::default(),
-            }
+impl<E> Default for ExprGroup<E>
+where
+    E: Expression,
+{
+    fn default() -> Self {
+        ExprGroup {
+            group: E::Group::default(),
         }
     }
+}
 
-    impl<E> Extend<Expr<E>> for ExprGroup<E>
+impl<E> Extend<Expr<E>> for ExprGroup<E>
+where
+    E: Expression,
+{
+    fn extend<I>(&mut self, iter: I)
     where
-        E: Expression,
+        I: IntoIterator<Item = Expr<E>>,
     {
-        fn extend<I>(&mut self, iter: I)
-        where
-            I: IntoIterator<Item = Expr<E>>,
-        {
-            self.group.extend(iter.into_iter().map(E::from_expr))
+        self.group.extend(iter.into_iter().map(E::from_expr))
+    }
+}
+
+impl<E> IntoIterator for ExprGroup<E>
+where
+    E: Expression,
+{
+    type Item = Expr<E>;
+
+    type IntoIter = ExprGroupIter<E>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        ExprGroupIter {
+            iter: self.group.into_iter(),
         }
     }
+}
 
-    impl<E> IntoIterator for ExprGroup<E>
+impl<E> FromIterator<Expr<E>> for ExprGroup<E>
+where
+    E: Expression,
+{
+    fn from_iter<I>(iter: I) -> Self
     where
-        E: Expression,
+        I: IntoIterator<Item = Expr<E>>,
     {
-        type Item = Expr<E>;
-
-        type IntoIter = ExprGroupIter<E>;
-
-        fn into_iter(self) -> Self::IntoIter {
-            ExprGroupIter {
-                iter: self.group.into_iter(),
-            }
+        Self {
+            group: E::Group::from_iter(iter.into_iter().map(E::from_expr)),
         }
     }
+}
 
-    impl<E> FromIterator<Expr<E>> for ExprGroup<E>
-    where
-        E: Expression,
-    {
-        fn from_iter<I>(iter: I) -> Self
-        where
-            I: IntoIterator<Item = Expr<E>>,
-        {
-            Self {
-                group: E::Group::from_iter(iter.into_iter().map(E::from_expr)),
-            }
-        }
+/// Expression Group Container Iterator
+pub struct ExprGroupIter<E>
+where
+    E: Expression,
+{
+    /// Inner iterator
+    pub iter: <E::Group as IntoIterator>::IntoIter,
+}
+
+impl<E> Iterator for ExprGroupIter<E>
+where
+    E: Expression,
+{
+    type Item = Expr<E>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.next().map(E::cases)
     }
+}
 
-    /// Expression Group Container Iterator
-    pub struct ExprGroupIter<E>
-    where
-        E: Expression,
-    {
-        iter: E::GroupIter,
-    }
-
-    impl<E> Iterator for ExprGroupIter<E>
-    where
-        E: Expression,
-    {
-        type Item = Expr<E>;
-
-        fn next(&mut self) -> Option<Self::Item> {
-            self.iter.next().map(E::cases)
-        }
-    }
+/// Generator for atomic induction using an iterator.
+pub fn iter_on_atoms<E, I, T, F>(iter: I, atom: E::Atom, f: F) -> T
+where
+    E: Expression,
+    E::Atom: PartialEq,
+    I: IntoIterator<Item = (E::Atom, T)>,
+    F: FnOnce(E::Atom) -> T,
+{
+    iter.into_iter()
+        .find(|(a, _)| *a == atom)
+        .map(move |(_, e)| e)
+        .unwrap_or_else(move || f(atom))
 }
 
 /// Map Trait
@@ -344,46 +377,15 @@ where
     }
 }
 
-/// Map from an Iterator
-pub trait MapIter<E>
+/// Generator for mapping using an iterator.
+#[inline]
+pub fn map_iter_on_atoms<E, I>(iter: I, atom: E::Atom) -> E::Atom
 where
     E: Expression,
+    E::Atom: PartialEq,
+    I: IntoIterator<Item = (E::Atom, E::Atom)>,
 {
-    /// Map term iterator
-    type TermIter: Iterator<Item = (E::Atom, E::Atom)>;
-
-    /// Get the map terms.
-    fn terms(&self) -> Self::TermIter;
-
-    /// Compute the map on atoms.
-    fn on_atoms(&self, atom: E::Atom) -> E::Atom
-    where
-        E::Atom: PartialEq,
-    {
-        self.terms()
-            .find(|(a, _)| *a == atom)
-            .map(move |(_, e)| e)
-            .unwrap_or(atom)
-    }
-
-    /// Compute the map on groups.
-    fn on_groups(&self, group: E::Group) -> E::Group
-    where
-        E::Atom: PartialEq,
-    {
-        group.into_iter().map(move |e| self.on_exprs(e)).collect()
-    }
-
-    /// Compute the map on expressions.
-    fn on_exprs(&self, expr: E) -> E
-    where
-        E::Atom: PartialEq,
-    {
-        match expr.cases() {
-            Expr::Atom(atom) => E::from_atom(self.on_atoms(atom)),
-            Expr::Group(group) => E::from_group(self.on_groups(group)),
-        }
-    }
+    iter_on_atoms::<E, _, _, _>(iter, atom, identity)
 }
 
 /// Substitution Trait
@@ -420,46 +422,15 @@ where
     }
 }
 
-/// Substitution from an Iterator
-pub trait SubstitutionIter<E>
+/// Generator for substitution using an iterator.
+#[inline]
+pub fn substitute_iter_on_atoms<E, I>(iter: I, atom: E::Atom) -> E
 where
     E: Expression,
+    E::Atom: PartialEq,
+    I: IntoIterator<Item = (E::Atom, E)>,
 {
-    /// Substitution term iterator
-    type TermIter: Iterator<Item = (E::Atom, E)>;
-
-    /// Get the substitution terms.
-    fn terms(&self) -> Self::TermIter;
-
-    /// Compute the substitution on atoms.
-    fn on_atoms(&self, atom: E::Atom) -> E
-    where
-        E::Atom: PartialEq,
-    {
-        self.terms()
-            .find(|(a, _)| *a == atom)
-            .map(move |(_, e)| e)
-            .unwrap_or_else(move || E::from_atom(atom))
-    }
-
-    /// Compute the substitution on groups.
-    fn on_groups(&self, group: E::Group) -> E::Group
-    where
-        E::Atom: PartialEq,
-    {
-        group.into_iter().map(move |e| self.on_exprs(e)).collect()
-    }
-
-    /// Compute the substitution on expressions.
-    fn on_exprs(&self, expr: E) -> E
-    where
-        E::Atom: PartialEq,
-    {
-        match expr.cases() {
-            Expr::Atom(atom) => self.on_atoms(atom),
-            Expr::Group(group) => E::from_group(self.on_groups(group)),
-        }
-    }
+    iter_on_atoms::<E, _, _, _>(iter, atom, E::from_atom)
 }
 
 /// Compute the symmetric difference of two multisets.
@@ -701,25 +672,13 @@ where
     }
 }
 
-/// Composition Trait
-pub trait Composition<E>
+/// Evaluate a composition by performing each substitution and then composing ratios.
+pub fn eval_composition<'t, E, R, S, I>(terms: I) -> R
 where
     E: Expression + PartialEq,
+    R: 't + Ratio<E, E::Group>,
+    S: 't + Substitution<E, E>,
+    I: IntoIterator<Item = (R, &'t S)>,
 {
-    /// Composition term ratio type.
-    type Ratio: Ratio<E, E::Group>;
-
-    /// Composition term substitution type.
-    type Substitution: Substitution<E, E>;
-
-    /// Composition term iterator type.
-    type TermIter: Iterator<Item = (Self::Ratio, Self::Substitution)>;
-
-    /// Get composition terms.
-    fn terms(&self) -> Self::TermIter;
-
-    /// Evaluate the composition.
-    fn eval(&self) -> Self::Ratio {
-        Ratio::compose(self.terms().map(move |(r, s)| r.substitute(&s)))
-    }
+    Ratio::compose(terms.into_iter().map(move |(r, s)| r.substitute(s)))
 }
