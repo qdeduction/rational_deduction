@@ -609,6 +609,7 @@ where
 }
 
 /// Conversion from `Expr` to `RatioPair` Error Type
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum RatioPairFromExprError {
     /// The expression is not a group.
     NotGroup,
