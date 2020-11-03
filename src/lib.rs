@@ -110,19 +110,6 @@ where
     }
 }
 
-/// Canonical Expression Reference Container Type
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub enum ExprRef<'e, E>
-where
-    E: 'e + Expression,
-{
-    /// Atomic element
-    Atom(&'e E::Atom),
-
-    /// Grouped expression
-    Group(&'e E::Group),
-}
-
 /// Canonical Concrete Expression Type
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum Expr<E>
@@ -214,8 +201,6 @@ where
 
     type Group = ExprGroup<E>;
 
-    // type GroupIter = ExprGroupIter<E>;
-
     #[inline]
     fn cases(self) -> Expr<Self> {
         match self {
@@ -304,7 +289,7 @@ where
         I: IntoIterator<Item = Expr<E>>,
     {
         Self {
-            group: E::Group::from_iter(iter.into_iter().map(E::from_expr)),
+            group: iter.into_iter().map(E::from_expr).collect(),
         }
     }
 }
@@ -327,6 +312,19 @@ where
     fn next(&mut self) -> Option<Self::Item> {
         self.iter.next().map(E::cases)
     }
+}
+
+/// Canonical Expression Reference Container Type
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum ExprRef<'e, E>
+where
+    E: 'e + Expression,
+{
+    /// Atomic element
+    Atom(&'e E::Atom),
+
+    /// Grouped expression
+    Group(&'e E::Group),
 }
 
 /// Generator for atomic induction using an iterator.
@@ -613,6 +611,19 @@ where
             bot: Default::default(),
         }
     }
+}
+
+/// Canonical Ratio Reference Type
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct RatioPairRef<'r, T, V>
+where
+    V: Default + Extend<T> + IntoIterator<Item = T> + FromIterator<T>,
+{
+    /// Top of the ratio
+    pub top: &'r V,
+
+    /// Bottom of the ratio
+    pub bot: &'r V,
 }
 
 impl<E> From<RatioPair<E, E::Group>> for Expr<E>
