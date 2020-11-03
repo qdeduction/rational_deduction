@@ -643,13 +643,12 @@ where
     }
 }
 
-impl<E, V> From<RatioPair<E, V>> for Expr<E>
+impl<E> From<RatioPair<E, E::Group>> for Expr<E>
 where
-    E: Expression<Group = V>,
-    V: Default + Extend<E> + IntoIterator<Item = E> + FromIterator<E>,
+    E: Expression,
 {
-    fn from(t: RatioPair<E, V>) -> Self {
-        let mut group = V::default();
+    fn from(t: RatioPair<E, E::Group>) -> Self {
+        let mut group = E::Group::default();
         group.extend(Some(E::from_group(t.top)));
         group.extend(Some(E::from_group(t.bot)));
         Expr::Group(group)
@@ -672,10 +671,9 @@ pub enum RatioPairFromExprError {
     MissingBotGroup,
 }
 
-impl<E, V> TryFrom<Expr<E>> for RatioPair<E, V>
+impl<E> TryFrom<Expr<E>> for RatioPair<E, E::Group>
 where
-    E: Expression<Group = V>,
-    V: Default + Extend<E> + IntoIterator<Item = E> + FromIterator<E>,
+    E: Expression,
 {
     type Error = RatioPairFromExprError;
 
