@@ -328,7 +328,7 @@ where
 }
 
 /// Generator for atomic induction using an iterator.
-pub fn iter_on_atoms<E, I, T, F>(iter: I, atom: E::Atom, f: F) -> T
+pub fn iter_on_atoms<E, I, T, F>(iter: I, f: F, atom: E::Atom) -> T
 where
     E: Expression,
     E::Atom: PartialEq,
@@ -383,7 +383,7 @@ where
     E::Atom: PartialEq,
     I: IntoIterator<Item = (E::Atom, E::Atom)>,
 {
-    iter_on_atoms::<E, _, _, _>(iter, atom, identity)
+    iter_on_atoms::<E, _, _, _>(iter, identity, atom)
 }
 
 /// Substitution Trait
@@ -428,7 +428,7 @@ where
     E::Atom: PartialEq,
     I: IntoIterator<Item = (E::Atom, E)>,
 {
-    iter_on_atoms::<E, _, _, _>(iter, atom, E::from_atom)
+    iter_on_atoms::<E, _, _, _>(iter, E::from_atom, atom)
 }
 
 /// Compute the symmetric difference of two multisets.
