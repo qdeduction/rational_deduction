@@ -328,16 +328,17 @@ where
 }
 
 /// Generator for atomic induction using an iterator.
-pub fn iter_on_atoms<E, I, T, F>(iter: I, f: F, atom: E::Atom) -> T
+pub fn iter_on_atoms<'s, E, I, T, F>(iter: I, f: F, atom: E::Atom) -> T
 where
     E: Expression,
-    E::Atom: PartialEq,
-    I: IntoIterator<Item = (E::Atom, T)>,
+    E::Atom: 's + PartialEq,
+    T: 's,
+    I: IntoIterator<Item = (&'s E::Atom, T)>,
     F: FnOnce(E::Atom) -> T,
 {
     iter.into_iter()
-        .find(|(a, _)| *a == atom)
-        .map(move |(_, e)| e)
+        .find(|(a, _)| **a == atom)
+        .map(move |(_, t)| t)
         .unwrap_or_else(move || f(atom))
 }
 
@@ -377,11 +378,11 @@ where
 
 /// Generator for mapping using an iterator.
 #[inline]
-pub fn map_iter_on_atoms<E, I>(iter: I, atom: E::Atom) -> E::Atom
+pub fn map_iter_on_atoms<'s, E, I>(iter: I, atom: E::Atom) -> E::Atom
 where
     E: Expression,
-    E::Atom: PartialEq,
-    I: IntoIterator<Item = (E::Atom, E::Atom)>,
+    E::Atom: 's + PartialEq,
+    I: IntoIterator<Item = (&'s E::Atom, E::Atom)>,
 {
     iter_on_atoms::<E, _, _, _>(iter, identity, atom)
 }
@@ -422,11 +423,11 @@ where
 
 /// Generator for substitution using an iterator.
 #[inline]
-pub fn substitute_iter_on_atoms<E, I>(iter: I, atom: E::Atom) -> E
+pub fn substitute_iter_on_atoms<'s, E, I>(iter: I, atom: E::Atom) -> E
 where
-    E: Expression,
+    E: 's + Expression,
     E::Atom: PartialEq,
-    I: IntoIterator<Item = (E::Atom, E)>,
+    I: IntoIterator<Item = (&'s E::Atom, E)>,
 {
     iter_on_atoms::<E, _, _, _>(iter, E::from_atom, atom)
 }
