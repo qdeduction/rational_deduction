@@ -131,21 +131,21 @@ where
     #[must_use]
     #[inline]
     pub fn is_atom(&self) -> bool {
-        matches!(self, Expr::Atom(_))
+        matches!(self, Self::Atom(_))
     }
 
     /// Check if expression is a grouped expression.
     #[must_use]
     #[inline]
     pub fn is_group(&self) -> bool {
-        matches!(self, Expr::Group(_))
+        matches!(self, Self::Group(_))
     }
 
     /// Convert from `Expr` to `Option<E::Atom>`.
     #[inline]
     pub fn atom(self) -> Option<E::Atom> {
         match self {
-            Expr::Atom(atom) => Some(atom),
+            Self::Atom(atom) => Some(atom),
             _ => None,
         }
     }
@@ -154,7 +154,7 @@ where
     #[inline]
     pub fn group(self) -> Option<E::Group> {
         match self {
-            Expr::Group(group) => Some(group),
+            Self::Group(group) => Some(group),
             _ => None,
         }
     }
@@ -164,7 +164,7 @@ where
     #[inline]
     pub fn unwrap_atom(self) -> E::Atom {
         match self {
-            Expr::Atom(atom) => atom,
+            Self::Atom(atom) => atom,
             _ => panic!("called `Expr::atom()` on a `Group` value"),
         }
     }
@@ -174,7 +174,7 @@ where
     #[inline]
     pub fn unwrap_group(self) -> E::Group {
         match self {
-            Expr::Group(group) => group,
+            Self::Group(group) => group,
             _ => panic!("called `Expr::group()` on an `Atom` value"),
         }
     }
@@ -187,8 +187,8 @@ where
     /// Monadic join for `Expr`.
     pub fn join(self) -> Expr<E> {
         match self {
-            Expr::Atom(atom) => Expr::Atom(atom),
-            Expr::Group(group) => Expr::from_group(group),
+            Self::Atom(atom) => Expr::Atom(atom),
+            Self::Group(group) => Expr::from_group(group),
         }
     }
 }
@@ -204,8 +204,8 @@ where
     #[inline]
     fn cases(self) -> Expr<Self> {
         match self {
-            Expr::Atom(atom) => Expr::Atom(atom),
-            Expr::Group(group) => Expr::Group(ExprGroup { group }),
+            Self::Atom(atom) => Expr::Atom(atom),
+            Self::Group(group) => Expr::Group(ExprGroup { group }),
         }
     }
 
@@ -224,7 +224,7 @@ impl<E> Default for Expr<E>
 where
     E: Expression,
 {
-    /// Default Expr
+    /// Default `Expr`
     ///
     /// The default expression is the empty group expression.
     fn default() -> Self {
@@ -617,7 +617,8 @@ where
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct RatioPairRef<'r, T, V>
 where
-    V: Default + Extend<T> + IntoIterator<Item = T> + FromIterator<T>,
+    T: 'r,
+    V: Default + Extend<&'r T> + IntoIterator<Item = &'r T> + FromIterator<&'r T>,
 {
     /// Top of the ratio
     pub top: &'r V,
@@ -626,15 +627,33 @@ where
     pub bot: &'r V,
 }
 
-impl<E> From<RatioPair<E, E::Group>> for Expr<E>
+impl<'r, T, V> RatioPairRef<'r, T, V>
+where
+    T: 'r,
+    V: Default + Extend<&'r T> + IntoIterator<Item = &'r T> + FromIterator<&'r T>,
+{
+    /// Reverse a `RatioPairRef`.
+    #[inline]
+    pub fn reverse(self) -> Self {
+        Self {
+            top: self.bot,
+            bot: self.top,
+        }
+    }
+}
+
+/// `RatioPair` over an `Expression` type
+pub type RatioPairExpr<E> = RatioPair<E, <E as Expression>::Group>;
+
+impl<E> From<RatioPairExpr<E>> for Expr<E>
 where
     E: Expression,
 {
-    fn from(t: RatioPair<E, E::Group>) -> Self {
+    fn from(ratio: RatioPairExpr<E>) -> Self {
         let mut group = E::Group::default();
-        group.extend(Some(E::from_group(t.top)));
-        group.extend(Some(E::from_group(t.bot)));
-        Expr::Group(group)
+        group.extend(Some(E::from_group(ratio.top)));
+        group.extend(Some(E::from_group(ratio.bot)));
+        Self::Group(group)
     }
 }
 
@@ -657,20 +676,20 @@ pub enum RatioPairFromExprError {
     MissingTopBotGroup,
 }
 
-impl<E> TryFrom<Expr<E>> for RatioPair<E, E::Group>
+impl<E> TryFrom<Expr<E>> for RatioPairExpr<E>
 where
     E: Expression,
 {
     type Error = RatioPairFromExprError;
 
-    fn try_from(t: Expr<E>) -> Result<Self, Self::Error> {
-        match t {
+    fn try_from(expr: Expr<E>) -> Result<Self, Self::Error> {
+        match expr {
             Expr::Atom(_) => Err(RatioPairFromExprError::NotGroup),
             Expr::Group(group) => {
                 let mut group = group.into_iter();
                 if let (Some(top), Some(bot), None) = (group.next(), group.next(), group.next()) {
                     match (top.cases(), bot.cases()) {
-                        (Expr::Group(top), Expr::Group(bot)) => Ok(RatioPair { top, bot }),
+                        (Expr::Group(top), Expr::Group(bot)) => Ok(Self { top, bot }),
                         (_, Expr::Group(_)) => Err(RatioPairFromExprError::MissingTopGroup),
                         (Expr::Group(_), _) => Err(RatioPairFromExprError::MissingBotGroup),
                         _ => Err(RatioPairFromExprError::MissingTopBotGroup),
@@ -683,11 +702,14 @@ where
     }
 }
 
+/// `RatioPairRef` over an `Expression` type
+pub type RatioPairExprRef<'r, E> = RatioPairRef<'r, E, <E as Expression>::Group>;
+
 /// Evaluate a composition by performing each substitution and then composing ratios.
 pub fn eval_composition<'t, E, R, S, I>(terms: I) -> R
 where
     E: Expression + PartialEq,
-    R: 't + Ratio<E, E::Group>,
+    R: Ratio<E, E::Group>,
     S: 't + Substitution<E, E>,
     I: IntoIterator<Item = (R, &'t S)>,
 {
