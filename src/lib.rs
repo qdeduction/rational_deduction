@@ -3,389 +3,12 @@
 
 //! The Rational Deduction Algorithm
 
+use exprz_core::*;
+
 use {
-    core::{
-        convert::{identity, TryFrom},
-        iter::FromIterator,
-    },
+    core::{convert::TryFrom, iter::FromIterator},
     std::vec::Vec,
 };
-
-/// Expression Tree
-pub trait Expression
-where
-    Self: Sized,
-{
-    /// Atomic element type
-    type Atom;
-
-    /// Group expression type
-    type Group: Default + Extend<Self> + IntoIterator<Item = Self> + FromIterator<Self>;
-
-    /// Convert to [canonical enumeration]
-    ///
-    /// [canonical enumeration]: enum.Expr.html
-    fn cases(self) -> Expr<Self>;
-
-    /// Build an `Expression` from an atomic element.
-    fn from_atom(atom: Self::Atom) -> Self;
-
-    /// Build an `Expression` from a grouped expression.
-    fn from_group(group: Self::Group) -> Self;
-
-    /// Convert from [canonical enumeration]
-    ///
-    /// [canonical enumeration]: enum.Expr.html
-    fn from_expr(expr: Expr<Self>) -> Self {
-        match expr {
-            Expr::Atom(atom) => Self::from_atom(atom),
-            Expr::Group(group) => Self::from_group(group),
-        }
-    }
-
-    /// Get default `Expression` from canonical enumeration
-    #[inline]
-    fn default() -> Self {
-        Self::from_expr(Default::default())
-    }
-
-    /// Check if expression is an atomic expression.
-    #[must_use]
-    #[inline]
-    fn is_atom(self) -> bool {
-        self.cases().is_atom()
-    }
-
-    /// Check if expression is a grouped expression.
-    #[must_use]
-    #[inline]
-    fn is_group(self) -> bool {
-        self.cases().is_group()
-    }
-
-    /// Convert from `Expression` to `Option<Self::Atom>`.
-    #[inline]
-    fn atom(self) -> Option<Self::Atom> {
-        self.cases().atom()
-    }
-
-    /// Convert from `Expression` to `Option<Self::Group>`.
-    #[inline]
-    fn group(self) -> Option<Self::Group> {
-        self.cases().group()
-    }
-
-    /// Unwrap expression into atomic expression.
-    #[must_use]
-    #[inline]
-    fn unwrap_atom(self) -> Self::Atom {
-        self.cases().unwrap_atom()
-    }
-
-    /// Unwrap expression into grouped expression.
-    #[must_use]
-    #[inline]
-    fn unwrap_group(self) -> Self::Group {
-        self.cases().unwrap_group()
-    }
-
-    /// Perform a mapping over the expression.
-    #[inline]
-    fn map<E, M>(self, m: &M) -> E
-    where
-        E: Expression,
-        M: Map<Self, E>,
-    {
-        m.on_exprs(self)
-    }
-
-    /// Perform a substitution over the expression.
-    #[inline]
-    fn substitute<E, S>(self, s: &S) -> E
-    where
-        E: Expression,
-        S: Substitution<Self, E>,
-    {
-        s.on_exprs(self)
-    }
-}
-
-/// Canonical Concrete Expression Type
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub enum Expr<E>
-where
-    E: Expression,
-{
-    /// Atomic element
-    Atom(E::Atom),
-
-    /// Grouped expression
-    Group(E::Group),
-}
-
-impl<E> Expr<E>
-where
-    E: Expression,
-{
-    /// Check if expression is an atomic expression.
-    #[must_use]
-    #[inline]
-    pub fn is_atom(&self) -> bool {
-        matches!(self, Self::Atom(_))
-    }
-
-    /// Check if expression is a grouped expression.
-    #[must_use]
-    #[inline]
-    pub fn is_group(&self) -> bool {
-        matches!(self, Self::Group(_))
-    }
-
-    /// Convert from `Expr` to `Option<E::Atom>`.
-    #[inline]
-    pub fn atom(self) -> Option<E::Atom> {
-        match self {
-            Self::Atom(atom) => Some(atom),
-            _ => None,
-        }
-    }
-
-    /// Convert from `Expr` to `Option<E::Group>`.
-    #[inline]
-    pub fn group(self) -> Option<E::Group> {
-        match self {
-            Self::Group(group) => Some(group),
-            _ => None,
-        }
-    }
-
-    /// Unwrap expression into atomic expression.
-    #[must_use]
-    #[inline]
-    pub fn unwrap_atom(self) -> E::Atom {
-        match self {
-            Self::Atom(atom) => atom,
-            _ => panic!("called `Expr::atom()` on a `Group` value"),
-        }
-    }
-
-    /// Unwrap expression into grouped expression.
-    #[must_use]
-    #[inline]
-    pub fn unwrap_group(self) -> E::Group {
-        match self {
-            Self::Group(group) => group,
-            _ => panic!("called `Expr::group()` on an `Atom` value"),
-        }
-    }
-}
-
-impl<E> Expr<Expr<E>>
-where
-    E: Expression,
-{
-    /// Monadic join for `Expr`.
-    pub fn join(self) -> Expr<E> {
-        match self {
-            Self::Atom(atom) => Expr::Atom(atom),
-            Self::Group(group) => Expr::from_group(group),
-        }
-    }
-}
-
-impl<E> Expression for Expr<E>
-where
-    E: Expression,
-{
-    type Atom = E::Atom;
-
-    type Group = ExprGroup<E>;
-
-    #[inline]
-    fn cases(self) -> Expr<Self> {
-        match self {
-            Self::Atom(atom) => Expr::Atom(atom),
-            Self::Group(group) => Expr::Group(ExprGroup { group }),
-        }
-    }
-
-    #[inline]
-    fn from_atom(atom: <Self as Expression>::Atom) -> Self {
-        Self::Atom(atom)
-    }
-
-    #[inline]
-    fn from_group(group: <Self as Expression>::Group) -> Self {
-        Self::Group(group.group)
-    }
-}
-
-impl<E> Default for Expr<E>
-where
-    E: Expression,
-{
-    /// Default `Expr`
-    ///
-    /// The default expression is the empty group expression.
-    fn default() -> Self {
-        <Self as Expression>::default()
-    }
-}
-
-/// Expression Group Container
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct ExprGroup<E>
-where
-    E: Expression,
-{
-    /// Inner group
-    pub group: E::Group,
-}
-
-impl<E> Default for ExprGroup<E>
-where
-    E: Expression,
-{
-    fn default() -> Self {
-        ExprGroup {
-            group: E::Group::default(),
-        }
-    }
-}
-
-impl<E> Extend<Expr<E>> for ExprGroup<E>
-where
-    E: Expression,
-{
-    fn extend<I>(&mut self, iter: I)
-    where
-        I: IntoIterator<Item = Expr<E>>,
-    {
-        self.group.extend(iter.into_iter().map(E::from_expr))
-    }
-}
-
-impl<E> IntoIterator for ExprGroup<E>
-where
-    E: Expression,
-{
-    type Item = Expr<E>;
-
-    type IntoIter = ExprGroupIter<E>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        ExprGroupIter {
-            iter: self.group.into_iter(),
-        }
-    }
-}
-
-impl<E> FromIterator<Expr<E>> for ExprGroup<E>
-where
-    E: Expression,
-{
-    fn from_iter<I>(iter: I) -> Self
-    where
-        I: IntoIterator<Item = Expr<E>>,
-    {
-        Self {
-            group: iter.into_iter().map(E::from_expr).collect(),
-        }
-    }
-}
-
-/// Expression Group Container Iterator
-pub struct ExprGroupIter<E>
-where
-    E: Expression,
-{
-    /// Inner iterator
-    pub iter: <E::Group as IntoIterator>::IntoIter,
-}
-
-impl<E> Iterator for ExprGroupIter<E>
-where
-    E: Expression,
-{
-    type Item = Expr<E>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.iter.next().map(E::cases)
-    }
-}
-
-/// Canonical Expression Reference Container Type
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub enum ExprRef<'e, E>
-where
-    E: 'e + Expression,
-{
-    /// Atomic element
-    Atom(&'e E::Atom),
-
-    /// Grouped expression
-    Group(&'e E::Group),
-}
-
-/// Generator for atomic induction using an iterator.
-pub fn iter_on_atoms<'s, E, I, T, F>(iter: I, f: F, atom: E::Atom) -> T
-where
-    E: Expression,
-    E::Atom: 's + PartialEq,
-    T: 's,
-    I: IntoIterator<Item = (&'s E::Atom, T)>,
-    F: FnOnce(E::Atom) -> T,
-{
-    iter.into_iter()
-        .find(|(a, _)| **a == atom)
-        .map(move |(_, t)| t)
-        .unwrap_or_else(move || f(atom))
-}
-
-/// Map Trait
-pub trait Map<A, B>
-where
-    A: Expression,
-    B: Expression,
-{
-    /// Compute the map on atoms.
-    fn on_atoms(&self, atom: A::Atom) -> B::Atom;
-
-    /// Compute the map on groups.
-    fn on_groups(&self, group: A::Group) -> B::Group {
-        group.into_iter().map(move |e| self.on_exprs(e)).collect()
-    }
-
-    /// Compute the map on expressions.
-    fn on_exprs(&self, expr: A) -> B {
-        match expr.cases() {
-            Expr::Atom(atom) => B::from_atom(self.on_atoms(atom)),
-            Expr::Group(group) => B::from_group(self.on_groups(group)),
-        }
-    }
-}
-
-impl<A, B, F> Map<A, B> for F
-where
-    A: Expression,
-    B: Expression,
-    F: Fn(A::Atom) -> B::Atom,
-{
-    fn on_atoms(&self, atom: A::Atom) -> B::Atom {
-        self(atom)
-    }
-}
-
-/// Generator for mapping using an iterator.
-#[inline]
-pub fn map_iter_on_atoms<'s, E, I>(iter: I, atom: E::Atom) -> E::Atom
-where
-    E: Expression,
-    E::Atom: 's + PartialEq,
-    I: IntoIterator<Item = (&'s E::Atom, E::Atom)>,
-{
-    iter_on_atoms::<E, _, _, _>(iter, identity, atom)
-}
 
 /// Substitution Trait
 pub trait Substitution<A, B>
@@ -398,15 +21,20 @@ where
 
     /// Compute the substitution on groups.
     fn on_groups(&self, group: A::Group) -> B::Group {
-        group.into_iter().map(move |e| self.on_exprs(e)).collect()
+        // FIXME: group.into_iter().map(move |e| self.on_exprs(e)).collect()
+        let _ = group;
+        todo!()
     }
 
     /// Compute the substitution on expressions.
     fn on_exprs(&self, expr: A) -> B {
-        match expr.cases() {
-            Expr::Atom(atom) => self.on_atoms(atom),
-            Expr::Group(group) => B::from_group(self.on_groups(group)),
-        }
+        // FIXME:
+        // match expr.cases() {
+        //     Expr::Atom(atom) => self.on_atoms(atom),
+        //     Expr::Group(group) => B::from_group(self.on_groups(group)),
+        // }
+        let _ = expr;
+        todo!()
     }
 }
 
@@ -416,6 +44,7 @@ where
     B: Expression,
     F: Fn(A::Atom) -> B,
 {
+    #[inline]
     fn on_atoms(&self, atom: A::Atom) -> B {
         self(atom)
     }
@@ -429,17 +58,35 @@ where
     E::Atom: PartialEq,
     I: IntoIterator<Item = (&'s E::Atom, E)>,
 {
-    iter_on_atoms::<E, _, _, _>(iter, E::from_atom, atom)
+    iter.into_iter()
+        .find(|(a, _)| **a == atom)
+        .map(move |(_, t)| t)
+        .unwrap_or_else(move || E::from_atom(atom))
 }
 
 /// Compute the symmetric difference of two multisets.
-pub fn multiset_symmetric_difference<T, L>(
+pub fn multiset_symmetric_difference<L, OL>(
     left: L,
-    right: Vec<T>,
-) -> (Vec<T>, impl Iterator<Item = T>)
+    right: Vec<L::Item>,
+) -> (OL, impl Iterator<Item = L::Item>)
 where
-    T: PartialEq,
-    L: IntoIterator<Item = T>,
+    L: IntoIterator,
+    L::Item: PartialEq,
+    OL: FromIterator<L::Item>,
+{
+    multiset_symmetric_difference_by(left, right, move |l, r| l == r)
+}
+
+/// Compute the symmetric difference of two multisets.
+pub fn multiset_symmetric_difference_by<L, OL, F>(
+    left: L,
+    right: Vec<L::Item>,
+    mut eq: F,
+) -> (OL, impl Iterator<Item = L::Item>)
+where
+    L: IntoIterator,
+    OL: FromIterator<L::Item>,
+    F: FnMut(&L::Item, &L::Item) -> bool,
 {
     let right_len = right.len();
     let mut matched_indices = Vec::<bool>::with_capacity(right_len);
@@ -448,7 +95,7 @@ where
         left.into_iter()
             .filter(|l| {
                 (&right).iter().enumerate().all(|(i, r)| {
-                    if *l == *r && !matched_indices[i] {
+                    if eq(l, r) && !matched_indices[i] {
                         matched_indices[i] = true;
                         return false;
                     }
@@ -466,47 +113,48 @@ where
 /// Ratio Trait
 pub trait Ratio<T, V>
 where
-    V: Default + Extend<T> + IntoIterator<Item = T> + FromIterator<T>,
+    V: IntoIterator<Item = T> + FromIterator<T>,
+    Self: Into<RatioPair<T, V>>,
 {
-    /// Create a new ratio from two base types.
+    /// Create a new ratio from two base type elements.
     fn new(top: V, bot: V) -> Self;
 
-    /// Convert to [canonical ratio type]
-    ///
-    /// [canonical ratio type]: struct.RatioPair.html
-    fn cases(self) -> RatioPair<T, V>;
-
+    /// Convert from a `RatioPair`.
     #[inline]
-    fn from_pair(pair: RatioPair<T, V>) -> Self
-    where
-        Self: Sized,
-    {
+    fn from_pair(pair: RatioPair<T, V>) -> Self {
         Self::new(pair.top, pair.bot)
     }
 
     /// Get the default ratio.
     #[inline]
-    fn default() -> Self
-    where
-        Self: Sized,
-    {
+    fn default() -> Self {
         Self::from_pair(Default::default())
     }
 
-    /// Compose two ratios according to the ratio monoid multiplication algorithm.
+    /// Compose two ratios using the ratio monoid multiplication algorithm.
     fn pair_compose(top: Self, bot: Self) -> Self
     where
-        Self: Sized,
         T: PartialEq,
     {
-        let top = top.cases();
-        let bot = bot.cases();
-        let (mut lower, upper) =
-            multiset_symmetric_difference(top.bot, bot.top.into_iter().collect());
-        let mut upper: V = upper.collect();
-        upper.extend(top.top);
-        lower.extend(bot.bot);
-        Self::new(upper.into_iter().collect(), lower.into_iter().collect())
+        Self::pair_compose_by(top, bot, move |l, r| l == r)
+    }
+
+    /// Compose two ratios using the ratio monoid multiplication algorithm.
+    fn pair_compose_by<F>(top: Self, bot: Self, mut eq: F) -> Self
+    where
+        F: FnMut(&T, &T) -> bool,
+    {
+        let top = top.into();
+        let bot = bot.into();
+        let (lower, upper) = multiset_symmetric_difference_by::<_, V, _>(
+            top.bot,
+            bot.top.into_iter().collect(),
+            &mut eq,
+        );
+        Self::new(
+            upper.chain(top.top).collect(),
+            lower.into_iter().chain(bot.bot).collect(),
+        )
     }
 
     /// Fold a collection of ratios using [`pair_compose`].
@@ -514,48 +162,36 @@ where
     /// [`pair_compose`]: trait.Ratio.html#method.pair_compose
     fn compose<I>(ratios: I) -> Self
     where
-        Self: Sized,
         I: IntoIterator<Item = Self>,
         T: PartialEq,
     {
+        Self::compose_by(ratios, move |l, r| l == r)
+    }
+
+    /// Fold a collection of ratios using [`pair_compose_by`].
+    ///
+    /// [`pair_compose_by`]: trait.Ratio.html#method.pair_compose_by
+    fn compose_by<I, F>(ratios: I, mut eq: F) -> Self
+    where
+        I: IntoIterator<Item = Self>,
+        F: FnMut(&T, &T) -> bool,
+    {
         let mut iter = ratios.into_iter();
         iter.next()
-            .map(move |r| iter.fold(r, Self::pair_compose))
+            .map(move |r| iter.fold(r, move |t, b| Self::pair_compose_by(t, b, &mut eq)))
             .unwrap_or_else(Self::default)
     }
 
-    /// Perform a mapping over the ratio.
-    fn map<RT, RV, R, M>(self, m: &M) -> R
-    where
-        Self: Sized,
-        T: Expression,
-        RT: Expression,
-        RV: Default + Extend<RT> + IntoIterator<Item = RT> + FromIterator<RT>,
-        R: Ratio<RT, RV>,
-        M: Map<T, RT>,
-    {
-        let ratio = self.cases();
-        Ratio::new(
-            ratio.top.into_iter().map(|e| m.on_exprs(e)).collect(),
-            ratio.bot.into_iter().map(|e| m.on_exprs(e)).collect(),
-        )
-    }
-
     /// Perform a substitution over the ratio.
-    fn substitute<RT, RV, R, S>(self, s: &S) -> R
+    fn substitute<F>(self, f: F) -> Self
     where
-        Self: Sized,
-        T: Expression,
-        RT: Expression,
-        RV: Default + Extend<RT> + IntoIterator<Item = RT> + FromIterator<RT>,
-        R: Ratio<RT, RV>,
-        S: Substitution<T, RT>,
+        T: Expression<Group = V>,
+        V: iter::IntoIteratorGen<T>,
+        F: FnMut(T::Atom) -> Self,
     {
-        let ratio = self.cases();
-        Ratio::new(
-            ratio.top.into_iter().map(|e| s.on_exprs(e)).collect(),
-            ratio.bot.into_iter().map(|e| s.on_exprs(e)).collect(),
-        )
+        let _ratio = self.into();
+        let _ = f;
+        todo!()
     }
 }
 
@@ -563,7 +199,7 @@ where
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct RatioPair<T, V>
 where
-    V: Default + Extend<T> + IntoIterator<Item = T> + FromIterator<T>,
+    V: IntoIterator<Item = T> + FromIterator<T>,
 {
     /// Top of the ratio
     pub top: V,
@@ -574,7 +210,7 @@ where
 
 impl<T, V> RatioPair<T, V>
 where
-    V: Default + Extend<T> + IntoIterator<Item = T> + FromIterator<T>,
+    V: IntoIterator<Item = T> + FromIterator<T>,
 {
     /// Reverse a `RatioPair`.
     #[inline]
@@ -588,57 +224,23 @@ where
 
 impl<T, V> Ratio<T, V> for RatioPair<T, V>
 where
-    V: Default + Extend<T> + IntoIterator<Item = T> + FromIterator<T>,
+    V: IntoIterator<Item = T> + FromIterator<T>,
 {
     #[inline]
     fn new(top: V, bot: V) -> Self {
         Self { top, bot }
     }
-
-    #[inline]
-    fn cases(self) -> Self {
-        self
-    }
 }
 
 impl<T, V> Default for RatioPair<T, V>
 where
-    V: Default + Extend<T> + IntoIterator<Item = T> + FromIterator<T>,
+    V: IntoIterator<Item = T> + FromIterator<T>,
 {
     #[inline]
     fn default() -> Self {
         Self {
-            top: Default::default(),
-            bot: Default::default(),
-        }
-    }
-}
-
-/// Canonical Ratio Reference Type
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct RatioPairRef<'r, T, V>
-where
-    T: 'r,
-    V: Default + Extend<&'r T> + IntoIterator<Item = &'r T> + FromIterator<&'r T>,
-{
-    /// Top of the ratio
-    pub top: &'r V,
-
-    /// Bottom of the ratio
-    pub bot: &'r V,
-}
-
-impl<'r, T, V> RatioPairRef<'r, T, V>
-where
-    T: 'r,
-    V: Default + Extend<&'r T> + IntoIterator<Item = &'r T> + FromIterator<&'r T>,
-{
-    /// Reverse a `RatioPairRef`.
-    #[inline]
-    pub fn reverse(self) -> Self {
-        Self {
-            top: self.bot,
-            bot: self.top,
+            top: V::from_iter(None),
+            bot: V::from_iter(None),
         }
     }
 }
@@ -649,12 +251,15 @@ pub type RatioPairExpr<E> = RatioPair<E, <E as Expression>::Group>;
 impl<E> From<RatioPairExpr<E>> for Expr<E>
 where
     E: Expression,
+    E::Group: IntoIterator<Item = E> + FromIterator<E>,
 {
     fn from(ratio: RatioPairExpr<E>) -> Self {
-        let mut group = E::Group::default();
-        group.extend(Some(E::from_group(ratio.top)));
-        group.extend(Some(E::from_group(ratio.bot)));
-        Self::Group(group)
+        Self::Group(
+            Some(E::from_group(ratio.top))
+                .into_iter()
+                .chain(Some(E::from_group(ratio.bot)))
+                .collect(),
+        )
     }
 }
 
@@ -680,6 +285,7 @@ pub enum RatioPairFromExprError {
 impl<E> TryFrom<Expr<E>> for RatioPairExpr<E>
 where
     E: Expression,
+    E::Group: IntoIterator<Item = E> + FromIterator<E>,
 {
     type Error = RatioPairFromExprError;
 
@@ -689,7 +295,7 @@ where
             Expr::Group(group) => {
                 let mut group = group.into_iter();
                 if let (Some(top), Some(bot), None) = (group.next(), group.next(), group.next()) {
-                    match (top.cases(), bot.cases()) {
+                    match (top.into(), bot.into()) {
                         (Expr::Group(top), Expr::Group(bot)) => Ok(Self { top, bot }),
                         (_, Expr::Group(_)) => Err(RatioPairFromExprError::MissingTopGroup),
                         (Expr::Group(_), _) => Err(RatioPairFromExprError::MissingBotGroup),
@@ -703,16 +309,16 @@ where
     }
 }
 
-/// `RatioPairRef` over an `Expression` type
-pub type RatioPairExprRef<'r, E> = RatioPairRef<'r, E, <E as Expression>::Group>;
-
 /// Evaluate a composition by performing each substitution and then composing ratios.
 pub fn eval_composition<'t, E, R, S, I>(terms: I) -> R
 where
     E: Expression + PartialEq,
+    E::Group: IntoIterator<Item = E> + FromIterator<E>,
     R: Ratio<E, E::Group>,
     S: 't + Substitution<E, E>,
     I: IntoIterator<Item = (R, &'t S)>,
 {
-    Ratio::compose(terms.into_iter().map(move |(r, s)| r.substitute(s)))
+    let _ = terms;
+    // FIXME: Ratio::compose(terms.into_iter().map(move |(r, s)| r.substitute(s)))
+    todo!()
 }

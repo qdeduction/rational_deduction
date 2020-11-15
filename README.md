@@ -16,4 +16,4 @@ _Rust implementation of the rational deduction algorithm_
 [![License](https://img.shields.io/badge/-LICENSE-lightgray?style=for-the-badge)](LICENSE)
 [![GitHub Repo](https://img.shields.io/badge/-GitHub-black?style=for-the-badge)](https://github.com/qdeduction/rational_deduction.rs)
 
-</div
+</div>
