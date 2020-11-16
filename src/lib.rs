@@ -34,6 +34,25 @@ where
     fn default() -> Self {
         Self::from_pair(Default::default())
     }
+    
+    /// Clone a `Ratio`.
+    #[inline]
+    fn clone(&self) -> Self {
+        // FIXME: implement `RatioRef` with same strategy as `Expr` and `ExprRef`
+        todo!()
+    }
+
+    /// Check if two `Ratio`s are equal.
+    #[inline]
+    fn eq<RT, RV, R>(&self, other: &R) -> bool
+    where
+        R: Ratio<RT, RV>,
+        RV: IntoIterator<Item = RT> + FromIterator<RT>,
+    {
+        // FIXME: implement `RatioRef` with same strategy as `Expr` and `ExprRef`
+        let _ = other;
+        todo!()
+    }
 
     /// Compose two ratios using the ratio monoid multiplication algorithm.
     #[inline]

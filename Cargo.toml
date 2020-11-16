@@ -19,5 +19,5 @@ is-it-maintained-open-issues = { repository = "qdeduction/rational_deduction.rs"
 maintenance = { status = "actively-developed" }
 
 [dependencies]
-exprz-core = "0.0.1"
+exprz-core = "0.0.2"
 
