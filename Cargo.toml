@@ -1,6 +1,6 @@
 [package]
 name = "rational_deduction"
-version = "0.0.0"
+version = "0.0.1"
 edition = "2018"
 authors = ["Brandon H. Gomes <bh.gomes@rutgers.edu>"]
 documentation = "https://docs.rs/rational_deduction"
@@ -12,7 +12,6 @@ keywords = ["deduction"]
 categories = [""]
 description = "Rust implementation of the rational deduction algorithm."
 exclude = [""]
-publish = false
 
 [badges]
 is-it-maintained-issue-resolution = { repository = "qdeduction/rational_deduction.rs" }
