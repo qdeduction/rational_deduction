@@ -4,8 +4,8 @@ version = "0.0.1"
 edition = "2018"
 authors = ["Brandon H. Gomes <bh.gomes@rutgers.edu>"]
 documentation = "https://docs.rs/rational_deduction"
-homepage = "https://github.com/qdeduction/rational_deduction.rs"
-repository = "https://github.com/qdeduction/rational_deduction.rs"
+homepage = "https://github.com/qdeduction/rational_deduction"
+repository = "https://github.com/qdeduction/rational_deduction"
 readme = "README.md"
 license = "ISC"
 keywords = ["deduction"]
@@ -14,8 +14,8 @@ description = "Rust implementation of the rational deduction algorithm."
 exclude = [""]
 
 [badges]
-is-it-maintained-issue-resolution = { repository = "qdeduction/rational_deduction.rs" }
-is-it-maintained-open-issues = { repository = "qdeduction/rational_deduction.rs" }
+is-it-maintained-issue-resolution = { repository = "qdeduction/rational_deduction" }
+is-it-maintained-open-issues = { repository = "qdeduction/rational_deduction" }
 maintenance = { status = "actively-developed" }
 
 [dependencies]

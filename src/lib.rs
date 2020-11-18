@@ -34,7 +34,7 @@ where
     fn default() -> Self {
         Self::from_pair(Default::default())
     }
-    
+
     /// Clone a `Ratio`.
     #[inline]
     fn clone(&self) -> Self {
