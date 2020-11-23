@@ -17,6 +17,9 @@ where
     /// Create a new ratio from two base type elements.
     fn new(top: V, bot: V) -> Self;
 
+    /// Get reference to top and bottom of ratio.
+    fn cases(&self) -> RatioPairRef<'_, T, V>;
+
     /// Convert from a `RatioPair`.
     #[inline]
     fn from_pair(pair: RatioPair<T, V>) -> Self {
@@ -37,9 +40,12 @@ where
 
     /// Clone a `Ratio`.
     #[inline]
-    fn clone(&self) -> Self {
-        // FIXME: implement `RatioRef` with same strategy as `Expr` and `ExprRef`
-        todo!()
+    fn clone(&self) -> Self
+    where
+        V: Clone,
+    {
+        let ratio = self.cases();
+        Self::new(ratio.top.clone(), ratio.bot.clone())
     }
 
     /// Check if two `Ratio`s are equal.
@@ -48,10 +54,21 @@ where
     where
         R: Ratio<RT, RV>,
         RV: IntoIterator<Item = RT> + FromIterator<RT>,
+        V: PartialEq<RV>,
     {
-        // FIXME: implement `RatioRef` with same strategy as `Expr` and `ExprRef`
-        let _ = other;
-        todo!()
+        self.eq_by(other, PartialEq::eq)
+    }
+
+    /// Check if two `Ratio`s are equal given the comparison function.
+    fn eq_by<RT, RV, R, F>(&self, other: &R, mut eq: F) -> bool
+    where
+        R: Ratio<RT, RV>,
+        RV: IntoIterator<Item = RT> + FromIterator<RT>,
+        F: FnMut(&V, &RV) -> bool,
+    {
+        let lhs = self.cases();
+        let rhs = other.cases();
+        eq(lhs.top, rhs.top) && eq(lhs.bot, rhs.bot)
     }
 
     /// Compose two ratios using the ratio monoid multiplication algorithm.
@@ -108,6 +125,19 @@ where
     }
 }
 
+/// Ratio Reference Type
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct RatioPairRef<'v, T, V>
+where
+    V: IntoIterator<Item = T> + FromIterator<T>,
+{
+    /// Top of the ratio
+    pub top: &'v V,
+
+    /// Bottom of the ratio
+    pub bot: &'v V,
+}
+
 /// Canonical Ratio Type
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct RatioPair<T, V>
@@ -156,6 +186,14 @@ where
     fn new(top: V, bot: V) -> Self {
         Self { top, bot }
     }
+
+    #[inline]
+    fn cases(&self) -> RatioPairRef<'_, T, V> {
+        RatioPairRef {
+            top: &self.top,
+            bot: &self.bot,
+        }
+    }
 }
 
 impl<T, V> Into<RatioPair<T, V>> for (V, V)
@@ -175,6 +213,14 @@ where
     #[inline]
     fn new(top: V, bot: V) -> Self {
         (top, bot)
+    }
+
+    #[inline]
+    fn cases(&self) -> RatioPairRef<'_, T, V> {
+        RatioPairRef {
+            top: &self.0,
+            bot: &self.1,
+        }
     }
 }
 
