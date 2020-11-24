@@ -5,8 +5,11 @@
 
 use {
     core::{convert::TryFrom, iter::FromIterator},
-    exprz_core::{Expr, Expression},
+    exprz::{Expr, Expression},
 };
+
+/// Package Version
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Ratio Trait
 pub trait Ratio<T, V>
@@ -274,8 +277,8 @@ where
 pub mod expr {
     use {
         super::Ratio,
-        core::iter::FromIterator,
-        exprz_core::{ExprRef, Expression},
+        core::{borrow::Borrow, iter::FromIterator},
+        exprz::{iter::IteratorGen, ExprRef, Expression},
     };
 
     /// Conversion from `Expr` to `RatioPair` Error Type
@@ -309,7 +312,6 @@ pub mod expr {
     {
         match expr.cases() {
             ExprRef::Group(group) => {
-                use {core::borrow::Borrow, exprz_core::iter::IteratorGen};
                 let mut iter = group.iter();
                 if let (Some(top), Some(bot), None) = (iter.next(), iter.next(), iter.next()) {
                     top.borrow().is_group() && bot.borrow().is_group()
@@ -366,7 +368,7 @@ pub mod expr {
 
 /// Utilities
 pub mod util {
-    use {core::iter::FromIterator, exprz_core::Expression};
+    use {core::iter::FromIterator, exprz::Expression};
 
     /// Compute the symmetric difference of two multisets.
     #[inline]
