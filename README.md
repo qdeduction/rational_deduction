@@ -1,5 +1,9 @@
 <div align="center">
 
+<a href="https://github.com/qdeduction/rational_deduction">
+    <img src="https://raw.githubusercontent.com/qdeduction/rational_deduction/master/assets/logo.svg" width="200em">
+</a>
+
 # rational_deduction
 
 [![Workflow Status](https://img.shields.io/github/workflow/status/qdeduction/rational_deduction/main?label=workflow&style=flat-square)](https://github.com/qdeduction/rational_deduction/actions)
