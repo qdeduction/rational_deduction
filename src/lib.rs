@@ -3,6 +3,11 @@
 
 //! Rational Deduction
 
+#![forbid(unsafe_code)]
+#![no_std]
+
+extern crate alloc;
+
 use {
     core::{convert::TryFrom, iter::FromIterator},
     exprz::{Expr, Expression},
@@ -368,7 +373,7 @@ pub mod expr {
 
 /// Utilities
 pub mod util {
-    use {core::iter::FromIterator, exprz::Expression};
+    use {alloc::vec::Vec, core::iter::FromIterator, exprz::Expression};
 
     /// Compute the symmetric difference of two multisets.
     #[inline]
@@ -395,6 +400,7 @@ pub mod util {
         OL: FromIterator<L::Item>,
         F: FnMut(&L::Item, &L::Item) -> bool,
     {
+        // TODO: use bit-vector
         let right_len = right.len();
         let mut matched_indices = Vec::<bool>::with_capacity(right_len);
         matched_indices.resize(right_len, false);
