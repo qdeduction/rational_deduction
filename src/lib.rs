@@ -383,7 +383,7 @@ pub mod expr {
 
 /// Utilities
 pub mod util {
-    use {alloc::vec::Vec, core::iter::FromIterator, exprz::Expression};
+    use {alloc::vec::Vec, bitvec::vec::BitVec, core::iter::FromIterator, exprz::Expression};
 
     /// Compute the symmetric difference of two multisets.
     #[inline]
@@ -410,16 +410,15 @@ pub mod util {
         OL: FromIterator<L::Item>,
         F: FnMut(&L::Item, &L::Item) -> bool,
     {
-        // TODO: use bit-vector
         let right_len = right.len();
-        let mut matched_indices = Vec::<bool>::with_capacity(right_len);
+        let mut matched_indices: BitVec = BitVec::with_capacity(right_len);
         matched_indices.resize(right_len, false);
         (
             left.into_iter()
                 .filter(|l| {
                     (&right).iter().enumerate().all(|(i, r)| {
                         if eq(l, r) && !matched_indices[i] {
-                            matched_indices[i] = true;
+                            matched_indices.set(i, true);
                             return false;
                         }
                         true
