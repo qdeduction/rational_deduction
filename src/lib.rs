@@ -1,7 +1,4 @@
-// file: src/lib.rs
-// authors: Brandon H. Gomes
-
-//! Rational Deduction Algorithms
+//! Rational Deduction Algorithm
 
 #![forbid(unsafe_code)]
 #![no_std]
@@ -99,6 +96,17 @@ where
         F: FnMut(&V, &RV) -> bool,
     {
         eq(self.top_ref(), other.top_ref()) && eq(self.bot_ref(), other.bot_ref())
+    }
+
+    /// Check if two `Ratio`s are equal by checking if they cancel symmetrically.
+    fn eq_by_symmetric_cancellation<RV, R, F>(&self, other: &R, eq: F) -> bool
+    where
+        R: Ratio<RV>,
+        F: FnMut(&V, &RV) -> bool,
+    {
+        // FIXME: implement
+        let _ = (other, eq);
+        todo!()
     }
 
     /// Compose two ratios using the ratio monoid multiplication algorithm.
@@ -247,7 +255,7 @@ where
     E: Expression,
     E::Group: IntoIterator<Item = E> + FromIterator<E>,
 {
-    /// Convert a `RatioPairExpr<E>` into an `Expr<E>` by forgetting the shape of the underlying
+    /// Convert a `RatioPair<E>` into an `Expr<E>` by forgetting the shape of the underlying
     /// expression.
     #[inline]
     fn from(ratio: RatioPair<E::Group>) -> Self {
@@ -267,10 +275,9 @@ where
 {
     type Error = expr::RatioPairFromExprError;
 
-    /// Parse an `Expr<E>` into a `RatioPairExpr<E>` if it has the correct shape.
+    /// Parse an `Expr<E>` into a `RatioPair<E>` if it has the correct shape.
     fn try_from(expr: Expr<E>) -> Result<Self, Self::Error> {
         match expr {
-            Expr::Atom(_) => Err(expr::RatioPairFromExprError::NotGroup),
             Expr::Group(group) => {
                 let mut iter = group.into_iter();
                 if let (Some(top), Some(bot), None) = (iter.next(), iter.next(), iter.next()) {
@@ -278,12 +285,13 @@ where
                         (Expr::Group(top), Expr::Group(bot)) => Ok(Self { top, bot }),
                         (_, Expr::Group(_)) => Err(expr::RatioPairFromExprError::MissingTopGroup),
                         (Expr::Group(_), _) => Err(expr::RatioPairFromExprError::MissingBotGroup),
-                        _ => Err(expr::RatioPairFromExprError::MissingTopBotGroup),
+                        _ => Err(expr::RatioPairFromExprError::MissingTopBotGroups),
                     }
                 } else {
                     Err(expr::RatioPairFromExprError::BadGroupShape)
                 }
             }
+            _ => Err(expr::RatioPairFromExprError::NotGroup),
         }
     }
 }
@@ -293,11 +301,11 @@ pub mod expr {
     use {
         super::Ratio,
         core::{borrow::Borrow, iter::FromIterator},
-        exprz::{iter::IteratorGen, ExprRef, Expression},
+        exprz::{iter::IteratorGen, Expression},
     };
 
     /// Conversion from `Expr` to `RatioPair` Error Type
-    #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
     pub enum RatioPairFromExprError {
         /// The expression is not a group.
         NotGroup,
@@ -312,12 +320,12 @@ pub mod expr {
         MissingBotGroup,
 
         /// The top and bot element of the group are not groups.
-        MissingTopBotGroup,
+        MissingTopBotGroups,
     }
 
     /// Check if an `Expression` has the right shape to be a ratio.
     ///
-    /// Use [`try_from`] to convert an `Expr<E>` to a `RatioPairExpr<E>`.
+    /// Use [`try_from`] to convert an `Expr<E>` to a `RatioPair<E>`.
     ///
     /// [`try_from`]: ../struct.RatioPair.html#impl-TryFrom<Expr<E>>
     #[must_use]
@@ -325,8 +333,8 @@ pub mod expr {
     where
         E: Expression,
     {
-        match expr.cases() {
-            ExprRef::Group(group) => {
+        match expr.cases().group() {
+            Some(group) => {
                 let mut iter = group.iter();
                 if let (Some(top), Some(bot), None) = (iter.next(), iter.next(), iter.next()) {
                     top.borrow().is_group() && bot.borrow().is_group()
