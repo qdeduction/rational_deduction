@@ -228,10 +228,10 @@ impl<V> Ratio<V> for RatioPair<V> {
     }
 }
 
-impl<V> Into<RatioPair<V>> for (V, V) {
+impl<V> From<(V, V)> for RatioPair<V> {
     #[inline]
-    fn into(self) -> RatioPair<V> {
-        RatioPair::new(self.0, self.1)
+    fn from(pair: (V, V)) -> Self {
+        Self::new(pair.0, pair.1)
     }
 }
 
