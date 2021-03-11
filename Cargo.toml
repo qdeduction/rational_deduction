@@ -20,4 +20,4 @@ maintenance = { status = "actively-developed" }
 
 [dependencies]
 exprz = "0.0.6"
-bitvec = { version = "0.21.1", features = ["alloc"] }
+bitvec = { version = "0.21.1", default-features = false, features = ["alloc"] }
