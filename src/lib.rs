@@ -9,10 +9,13 @@ use {
     core::{borrow::Borrow, convert::TryFrom, iter::FromIterator},
     exprz::{
         iter::{IntoIteratorGen, IteratorGen},
-        shape::Shape,
+        shape::{Matcher, Shape},
         Expr, Expression,
     },
 };
+
+/// Base Expression Library
+pub use exprz;
 
 /// Package Version
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -265,10 +268,7 @@ where
     #[inline]
     fn from(ratio: RatioPair<E::Group>) -> Self {
         Self::Group(
-            Some(E::from_group(ratio.top))
-                .into_iter()
-                .chain(Some(E::from_group(ratio.bot)))
-                .collect(),
+            util::two_item_iter(E::from_group(ratio.top), E::from_group(ratio.bot)).collect(),
         )
     }
 }
@@ -318,11 +318,13 @@ where
     }
 }
 
-impl<E> Shape<E> for RatioPair<E::Group>
+impl<E> Matcher<E> for RatioPair<E::Group>
 where
     E: Expression,
     E::Group: IntoIterator<Item = E> + FromIterator<E>,
 {
+    type Error = RatioPairShapeError;
+
     #[inline]
     fn matches_atom(atom: &E::Atom) -> Result<(), Self::Error> {
         let _ = atom;
@@ -345,6 +347,13 @@ where
             _ => Err(Self::Error::BadGroupShape),
         }
     }
+}
+
+impl<E> Shape<E> for RatioPair<E::Group>
+where
+    E: Expression,
+    E::Group: IntoIterator<Item = E> + FromIterator<E>,
+{
 }
 
 /// Expression Ratio Module
@@ -479,5 +488,11 @@ pub mod util {
             .find(|(a, _)| **a == atom)
             .map(move |(_, t)| t)
             .unwrap_or_else(move || E::from_atom(atom))
+    }
+
+    /// Generates a two item iterator.
+    #[inline]
+    pub fn two_item_iter<T>(fst: T, snd: T) -> impl Iterator<Item = T> {
+        Some(fst).into_iter().chain(Some(snd))
     }
 }
