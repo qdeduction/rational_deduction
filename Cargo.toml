@@ -1,6 +1,6 @@
 [package]
 name = "rational_deduction"
-version = "0.0.3"
+version = "0.0.4"
 edition = "2018"
 authors = ["Brandon H. Gomes <bh.gomes@rutgers.edu>"]
 documentation = "https://docs.rs/rational_deduction"
@@ -19,5 +19,5 @@ is-it-maintained-open-issues = { repository = "qdeduction/rational_deduction" }
 maintenance = { status = "actively-developed" }
 
 [dependencies]
-exprz = "0.0.8"
+exprz = "0.0.9"
 bitvec = { version = "0.21.1", default-features = false, features = ["alloc"] }
