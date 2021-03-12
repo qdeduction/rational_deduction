@@ -6,8 +6,12 @@
 extern crate alloc;
 
 use {
-    core::{convert::TryFrom, iter::FromIterator},
-    exprz::{Expr, Expression},
+    core::{borrow::Borrow, convert::TryFrom, iter::FromIterator},
+    exprz::{
+        iter::{IntoIteratorGen, IteratorGen},
+        shape::Shape,
+        Expr, Expression,
+    },
 };
 
 /// Package Version
@@ -113,7 +117,7 @@ where
     #[inline]
     fn pair_compose<T>(top: Self, bot: Self) -> Self
     where
-        V: IntoIterator + FromIterator<<V as IntoIterator>::Item>,
+        V: IntoIterator + FromIterator<V::Item>,
         V::Item: PartialEq,
     {
         Self::pair_compose_by(top, bot, PartialEq::eq)
@@ -122,7 +126,7 @@ where
     /// Compose two ratios using the ratio monoid multiplication algorithm.
     fn pair_compose_by<F>(top: Self, bot: Self, eq: F) -> Self
     where
-        V: IntoIterator + FromIterator<<V as IntoIterator>::Item>,
+        V: IntoIterator + FromIterator<V::Item>,
         F: FnMut(&V::Item, &V::Item) -> bool,
     {
         let top = top.into();
@@ -144,7 +148,7 @@ where
     #[inline]
     fn compose<I>(ratios: I) -> Self
     where
-        V: IntoIterator + FromIterator<<V as IntoIterator>::Item>,
+        V: IntoIterator + FromIterator<V::Item>,
         V::Item: PartialEq,
         I: IntoIterator<Item = Self>,
     {
@@ -156,7 +160,7 @@ where
     /// [`pair_compose_by`]: trait.Ratio.html#method.pair_compose_by
     fn compose_by<I, F>(ratios: I, mut eq: F) -> Self
     where
-        V: IntoIterator + FromIterator<<V as IntoIterator>::Item>,
+        V: IntoIterator + FromIterator<V::Item>,
         I: IntoIterator<Item = Self>,
         F: FnMut(&V::Item, &V::Item) -> bool,
     {
@@ -170,7 +174,7 @@ where
     #[inline]
     fn has_cancellation(top: &Self, bot: &Self) -> bool
     where
-        V: IntoIterator + FromIterator<<V as IntoIterator>::Item>,
+        V: IntoIterator + FromIterator<V::Item>,
         V::Item: PartialEq,
     {
         Self::has_cancellation_by(top, bot, PartialEq::eq)
@@ -179,10 +183,11 @@ where
     /// Check if there would be any cancellation if you composed the two elements.
     fn has_cancellation_by<F>(top: &Self, bot: &Self, eq: F) -> bool
     where
-        V: IntoIterator + FromIterator<<V as IntoIterator>::Item>,
+        V: IntoIterator + FromIterator<V::Item>,
         F: FnMut(&V::Item, &V::Item) -> bool,
     {
         let _ = (top, bot, eq);
+        // FIXME: implement
         /*
         let top = top.cases();
         let bot = bot.cases();
@@ -268,85 +273,86 @@ where
     }
 }
 
+/// Conversion from `Expr` to `RatioPair` Error Type
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum RatioPairShapeError {
+    /// The expression is not a group.
+    NotGroup,
+
+    /// The expression has the wrong group shape.
+    BadGroupShape,
+
+    /// The `top` element of the group is not a group.
+    MissingTopGroup,
+
+    /// The `bot` element of the group is not a group.
+    MissingBotGroup,
+
+    /// The `top` and `bot` element of the group are not groups.
+    MissingTopBotGroups,
+}
+
 impl<E> TryFrom<Expr<E>> for RatioPair<E::Group>
 where
     E: Expression,
     E::Group: IntoIterator<Item = E>,
 {
-    type Error = expr::RatioPairFromExprError;
+    type Error = RatioPairShapeError;
 
-    /// Parse an `Expr<E>` into a `RatioPair<E>` if it has the correct shape.
     fn try_from(expr: Expr<E>) -> Result<Self, Self::Error> {
-        match expr {
-            Expr::Group(group) => {
+        match expr.group() {
+            Some(group) => {
                 let mut iter = group.into_iter();
-                if let (Some(top), Some(bot), None) = (iter.next(), iter.next(), iter.next()) {
-                    match (top.into(), bot.into()) {
-                        (Expr::Group(top), Expr::Group(bot)) => Ok(Self { top, bot }),
-                        (_, Expr::Group(_)) => Err(expr::RatioPairFromExprError::MissingTopGroup),
-                        (Expr::Group(_), _) => Err(expr::RatioPairFromExprError::MissingBotGroup),
-                        _ => Err(expr::RatioPairFromExprError::MissingTopBotGroups),
-                    }
-                } else {
-                    Err(expr::RatioPairFromExprError::BadGroupShape)
+                match (iter.next(), iter.next(), iter.next()) {
+                    (Some(top), Some(bot), None) => match (top.group(), bot.group()) {
+                        (Some(top), Some(bot)) => Ok(Self { top, bot }),
+                        (_, Some(_)) => Err(Self::Error::MissingTopGroup),
+                        (Some(_), _) => Err(Self::Error::MissingBotGroup),
+                        _ => Err(Self::Error::MissingTopBotGroups),
+                    },
+                    _ => Err(Self::Error::BadGroupShape),
                 }
             }
-            _ => Err(expr::RatioPairFromExprError::NotGroup),
+            _ => Err(Self::Error::NotGroup),
+        }
+    }
+}
+
+impl<E> Shape<E> for RatioPair<E::Group>
+where
+    E: Expression,
+    E::Group: IntoIterator<Item = E> + FromIterator<E>,
+{
+    #[inline]
+    fn matches_atom(atom: &E::Atom) -> Result<(), Self::Error> {
+        let _ = atom;
+        Err(Self::Error::NotGroup)
+    }
+
+    fn matches_group(
+        group: <E::Group as IntoIteratorGen<E>>::IterGen<'_>,
+    ) -> Result<(), Self::Error> {
+        let mut iter = group.iter();
+        match (iter.next(), iter.next(), iter.next()) {
+            (Some(top), Some(bot), None) => {
+                match (top.borrow().is_group(), bot.borrow().is_group()) {
+                    (true, true) => Ok(()),
+                    (true, false) => Err(Self::Error::MissingBotGroup),
+                    (false, true) => Err(Self::Error::MissingTopGroup),
+                    _ => Err(Self::Error::MissingTopBotGroups),
+                }
+            }
+            _ => Err(Self::Error::BadGroupShape),
         }
     }
 }
 
 /// Expression Ratio Module
 pub mod expr {
-    use {
-        super::Ratio,
-        core::{borrow::Borrow, iter::FromIterator},
-        exprz::{iter::IteratorGen, Expression},
-    };
-
-    /// Conversion from `Expr` to `RatioPair` Error Type
-    #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-    pub enum RatioPairFromExprError {
-        /// The expression is not a group.
-        NotGroup,
-
-        /// The expression has the wrong group shape.
-        BadGroupShape,
-
-        /// The top element of the group is not a group.
-        MissingTopGroup,
-
-        /// The bot element of the group is not a group.
-        MissingBotGroup,
-
-        /// The top and bot element of the group are not groups.
-        MissingTopBotGroups,
-    }
-
-    /// Check if an `Expression` has the right shape to be a ratio.
-    ///
-    /// Use [`try_from`] to convert an `Expr<E>` to a `RatioPair<E>`.
-    ///
-    /// [`try_from`]: ../struct.RatioPair.html#impl-TryFrom<Expr<E>>
-    #[must_use]
-    pub fn has_ratio_shape<E>(expr: &E) -> bool
-    where
-        E: Expression,
-    {
-        match expr.cases().group() {
-            Some(group) => {
-                let mut iter = group.iter();
-                if let (Some(top), Some(bot), None) = (iter.next(), iter.next(), iter.next()) {
-                    top.borrow().is_group() && bot.borrow().is_group()
-                } else {
-                    false
-                }
-            }
-            _ => false,
-        }
-    }
+    use {super::Ratio, core::iter::FromIterator, exprz::Expression};
 
     /// Substitute an `Expression` into each `Atom` of `self`.
+    #[must_use]
     #[inline]
     pub fn substitute<E, R, F>(ratio: R, mut f: F) -> R
     where
@@ -371,6 +377,7 @@ pub mod expr {
     }
 
     /// Evaluate a composition by performing each substitution and then composing ratios.
+    #[must_use]
     #[inline]
     pub fn eval_composition<E, R, F, S, I>(terms: I) -> R
     where

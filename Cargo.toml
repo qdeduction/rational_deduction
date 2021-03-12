@@ -19,5 +19,5 @@ is-it-maintained-open-issues = { repository = "qdeduction/rational_deduction" }
 maintenance = { status = "actively-developed" }
 
 [dependencies]
-exprz = "0.0.9"
+exprz = { version = "0.0.10", features = ["shape"] }
 bitvec = { version = "0.21.1", default-features = false, features = ["alloc"] }
