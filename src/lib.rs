@@ -21,7 +21,6 @@ use {
     exprz::{
         iter::{IntoIteratorGen, IteratorGen},
         shape::{Matcher, Shape},
-        Expr, ExprRef, Expression,
     },
 };
 
@@ -29,7 +28,11 @@ use {
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Re-Exported Objects
-pub use {exprz, rule::Rule, substitution::Substitution};
+pub use {
+    exprz::{self, Expr, ExprRef, Expression},
+    rule::Rule,
+    substitution::Substitution,
+};
 
 /// Container Helper Trait
 pub trait Container<T>: FromIterator<T> + IntoIterator<Item = T> {}
