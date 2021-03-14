@@ -607,6 +607,18 @@ pub mod substitution {
         {
             expr.substitute_ref(move |atom| self.apply_atom_ref(atom))
         }
+
+        /// Tries to generate a substitution from two expressions.
+        #[inline]
+        fn generate<F>(lhs: &E, rhs: &E, mut can_substitute: F) -> Option<Directed<Self>>
+        where
+            Self: Sized,
+            E::Atom: Clone + PartialEq,
+            F: FnMut(&E::Atom) -> bool,
+        {
+            generate::<_, Structure<_, V>, _>(lhs, rhs, &mut can_substitute)
+                .map(move |d| d.map(Self::from))
+        }
     }
 
     /// Substitution Structure Type
@@ -799,11 +811,7 @@ pub mod substitution {
     }
 
     /// Directed Substitution
-    pub enum Directed<E, S>
-    where
-        E: Expression,
-        S: FromIterator<Term<E>> + IntoIterator<Item = Term<E>>,
-    {
+    pub enum Directed<S> {
         /// Forward Substitution
         Forward(S),
 
@@ -814,11 +822,7 @@ pub mod substitution {
     /// Forward Substitution Boolean
     pub type IsForward = bool;
 
-    impl<E, S> Directed<E, S>
-    where
-        E: Expression,
-        S: FromIterator<Term<E>> + IntoIterator<Item = Term<E>>,
-    {
+    impl<S> Directed<S> {
         /// Returns `true` if the substitution is a `Forward` substitution.
         #[inline]
         pub fn is_forward(&self) -> bool {
@@ -851,6 +855,18 @@ pub mod substitution {
             }
         }
 
+        /// Maps a `Directed<S>` to `Directed<T>` by applying a function to a contained value.
+        #[inline]
+        pub fn map<T, F>(self, f: F) -> Directed<T>
+        where
+            F: FnOnce(S) -> T,
+        {
+            match self {
+                Self::Forward(substitution) => Directed::Forward(f(substitution)),
+                Self::Backward(substitution) => Directed::Backward(f(substitution)),
+            }
+        }
+
         /// Returns the inner substitution.
         #[inline]
         pub fn substitution(self) -> S {
@@ -877,7 +893,7 @@ pub mod substitution {
     }
 
     /// Tries to generate a substitution from two expressions.
-    pub fn generate<E, S, F>(lhs: &E, rhs: &E, can_substitute: &mut F) -> Option<Directed<E, S>>
+    pub fn generate<E, S, F>(lhs: &E, rhs: &E, can_substitute: &mut F) -> Option<Directed<S>>
     where
         E: Expression,
         E::Atom: Clone + PartialEq,
@@ -919,7 +935,7 @@ pub mod substitution {
         lhs: <E::Group as IntoIteratorGen<E>>::IterGen<'_>,
         rhs: <E::Group as IntoIteratorGen<E>>::IterGen<'_>,
         can_substitute: &mut F,
-    ) -> Option<Directed<E, S>>
+    ) -> Option<Directed<S>>
     where
         E: Expression,
         E::Atom: Clone + PartialEq,
