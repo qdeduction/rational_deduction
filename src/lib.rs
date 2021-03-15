@@ -154,7 +154,6 @@ pub mod rule {
     }
 
     /// Rule Trait
-    // TODO: move all `&self` methods to `Reference`
     pub trait Rule<E>: super::Structure<E, Structure<E>>
     where
         E: Expression,
@@ -179,8 +178,7 @@ pub mod rule {
             E::Atom: PartialEq,
             R: Rule<E>,
         {
-            ExprRef::<E>::eq_groups::<E>(&self.top().gen(), &other.top().gen())
-                && ExprRef::<E>::eq_groups::<E>(&self.bot().gen(), &other.bot().gen())
+            self.cases().eq(&other.cases())
         }
 
         /// Clones a rule.
@@ -190,8 +188,7 @@ pub mod rule {
             E::Atom: Clone,
             E::Group: FromIterator<E>,
         {
-            // FIXME: implement `clone`
-            todo!()
+            Self::from(Clone::clone(&Structure::from(self.cases())))
         }
 
         /// Builds a new `Rule` from two groups.
@@ -221,7 +218,7 @@ pub mod rule {
     }
 
     /// Rule Reference Structure Type
-    #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+    #[derive(Clone, Copy, Debug)]
     pub struct Reference<'e, E>
     where
         E: Expression,
@@ -246,8 +243,27 @@ pub mod rule {
         }
     }
 
+    impl<'e, E> PartialEq for Reference<'e, E>
+    where
+        E: Expression,
+        E::Atom: PartialEq,
+    {
+        #[inline]
+        fn eq(&self, other: &Self) -> bool {
+            ExprRef::<E>::eq_groups::<E>(&self.top.gen(), &other.top.gen())
+                && ExprRef::<E>::eq_groups::<E>(&self.bot.gen(), &other.bot.gen())
+        }
+    }
+
+    impl<'e, E> Eq for Reference<'e, E>
+    where
+        E: Expression,
+        E::Atom: PartialEq,
+    {
+    }
+
     /// Rule Structure Type
-    #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+    #[derive(Debug)]
     pub struct Structure<E>
     where
         E: Expression,
@@ -279,6 +295,73 @@ pub mod rule {
         fn default() -> Self {
             Self::new(E::Group::from_iter(None), E::Group::from_iter(None))
         }
+    }
+
+    impl<'e, E> From<Reference<'e, E>> for Structure<E>
+    where
+        E: Expression,
+        E::Atom: Clone,
+        E::Group: FromIterator<E>,
+    {
+        #[must_use]
+        #[inline]
+        fn from(reference: Reference<'e, E>) -> Self {
+            // FIXME: move this "algorithm" to `ExprZ`
+            Self::new(
+                reference
+                    .top
+                    .gen()
+                    .iter()
+                    .map(move |e| e.borrow().clone())
+                    .collect(),
+                reference
+                    .bot
+                    .gen()
+                    .iter()
+                    .map(move |e| e.borrow().clone())
+                    .collect(),
+            )
+        }
+    }
+
+    impl<'e, E> From<&'e Structure<E>> for Reference<'e, E>
+    where
+        E: Expression,
+    {
+        #[inline]
+        fn from(reference: &'e Structure<E>) -> Self {
+            Self::new(&reference.top, &reference.bot)
+        }
+    }
+
+    impl<E> Clone for Structure<E>
+    where
+        E: Expression,
+        E::Atom: Clone,
+        E::Group: FromIterator<E>,
+    {
+        #[inline]
+        fn clone(&self) -> Self {
+            Reference::from(self).into()
+        }
+    }
+
+    impl<E> PartialEq for Structure<E>
+    where
+        E: Expression,
+        E::Atom: PartialEq,
+    {
+        #[inline]
+        fn eq(&self, other: &Self) -> bool {
+            Reference::from(self).eq(&other.into())
+        }
+    }
+
+    impl<E> Eq for Structure<E>
+    where
+        E: Expression,
+        E::Atom: PartialEq,
+    {
     }
 
     impl<E> From<Structure<E>> for Expr<E>
@@ -399,7 +482,7 @@ pub mod substitution {
     };
 
     /// Substitution Term Reference Type
-    #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+    #[derive(Clone, Copy, Debug)]
     pub struct TermRef<'e, E>
     where
         E: Expression,
@@ -434,8 +517,26 @@ pub mod substitution {
         }
     }
 
+    impl<'e, E> PartialEq for TermRef<'e, E>
+    where
+        E: Expression,
+        E::Atom: PartialEq,
+    {
+        #[inline]
+        fn eq(&self, other: &Self) -> bool {
+            self.var.eq(other.var) && self.expr.eq(other.expr)
+        }
+    }
+
+    impl<'e, E> Eq for TermRef<'e, E>
+    where
+        E: Expression,
+        E::Atom: PartialEq,
+    {
+    }
+
     /// Substitution Term Type
-    #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+    #[derive(Debug)]
     pub struct Term<E>
     where
         E: Expression,
@@ -511,6 +612,36 @@ pub mod substitution {
         fn iter(self) -> impl Iterator<Item = E> {
             util::two_item_iter(E::from_atom(self.var), self.expr)
         }
+    }
+
+    impl<E> Clone for Term<E>
+    where
+        E: Expression,
+        E::Atom: Clone,
+        E::Group: FromIterator<E>,
+    {
+        #[inline]
+        fn clone(&self) -> Self {
+            Self::new(self.var.clone(), self.expr.clone())
+        }
+    }
+
+    impl<E> PartialEq for Term<E>
+    where
+        E: Expression,
+        E::Atom: PartialEq,
+    {
+        #[inline]
+        fn eq(&self, other: &Self) -> bool {
+            self.as_ref().eq(&other.as_ref())
+        }
+    }
+
+    impl<E> Eq for Term<E>
+    where
+        E: Expression,
+        E::Atom: PartialEq,
+    {
     }
 
     impl<E> TryFrom<(E, E)> for Term<E>
@@ -622,6 +753,7 @@ pub mod substitution {
     }
 
     /// Substitution Structure Type
+    #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
     pub struct Structure<E, V = Vec<Term<E>>>
     where
         E: Expression,
@@ -1375,7 +1507,7 @@ where
 }
 
 /// Ratio Reference Type
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct RatioPairRef<'v, V> {
     /// Top of the ratio
     pub top: &'v V,
@@ -1385,7 +1517,7 @@ pub struct RatioPairRef<'v, V> {
 }
 
 /// Canonical Ratio Type
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 pub struct RatioPair<V> {
     /// Top of the ratio
     pub top: V,
