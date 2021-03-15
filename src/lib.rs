@@ -27,7 +27,6 @@ use {
 /// Package Version
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// Re-Exported Objects
 pub use {
     exprz::{self, Expr, ExprRef, Expression},
     rule::Rule,
@@ -481,6 +480,133 @@ pub mod substitution {
         alloc::vec::Vec,
         core::{mem, slice},
     };
+
+    /// Returns the corresponding expression from the substitution iterator.
+    #[inline]
+    pub fn get_expression<'s, E, I>(iter: I, atom: &E::Atom) -> Option<E>
+    where
+        E: 's + Expression,
+        E::Atom: PartialEq,
+        I: IntoIterator<Item = (&'s E::Atom, E)>,
+    {
+        iter.into_iter()
+            .find(move |(a, _)| *a == atom)
+            .map(move |(_, t)| t)
+    }
+
+    #[inline]
+    fn from_iter_on_atoms_inner<'s, E, I>(iter: &mut I, atom: E::Atom) -> E
+    where
+        E: 's + Expression,
+        E::Atom: PartialEq,
+        I: Iterator<Item = (&'s E::Atom, E)>,
+    {
+        get_expression(iter, &atom).unwrap_or_else(move || E::from_atom(atom))
+    }
+
+    #[inline]
+    fn from_iter_on_atoms_ref_inner<'s, E, I>(iter: &mut I, atom: &E::Atom) -> E
+    where
+        E: 's + Expression,
+        E::Atom: Clone + PartialEq,
+        I: Iterator<Item = (&'s E::Atom, E)>,
+    {
+        get_expression(iter, atom).unwrap_or_else(move || E::from_atom(atom.clone()))
+    }
+
+    /// Performs a substitution using data from an iterator to an atomic expression.
+    #[inline]
+    pub fn from_iter_on_atoms<'s, E, I>(iter: I, atom: E::Atom) -> E
+    where
+        E: 's + Expression,
+        E::Atom: PartialEq,
+        I: IntoIterator<Item = (&'s E::Atom, E)>,
+    {
+        from_iter_on_atoms_inner(&mut iter.into_iter(), atom)
+    }
+
+    /// Performs a substitution by reference using data from an iterator to an atomic expression.
+    #[inline]
+    pub fn from_iter_on_atoms_ref<'s, E, I>(iter: I, atom: &E::Atom) -> E
+    where
+        E: 's + Expression,
+        E::Atom: Clone + PartialEq,
+        I: IntoIterator<Item = (&'s E::Atom, E)>,
+    {
+        from_iter_on_atoms_ref_inner(&mut iter.into_iter(), atom)
+    }
+
+    /// Returns a function which performs substitution using data from an iterator to an atomic expression.
+    #[inline]
+    pub fn from_iter_on_atoms_fn<'s, E, I>(iter: I) -> impl FnMut(E::Atom) -> E
+    where
+        E: 's + Expression,
+        E::Atom: PartialEq,
+        I: IntoIterator<Item = (&'s E::Atom, E)>,
+    {
+        let mut iter = iter.into_iter();
+        move |atom| from_iter_on_atoms_inner(&mut iter, atom)
+    }
+
+    /// Returns a function which performs substitution by reference using data from an iterator to an atomic expression.
+    #[inline]
+    pub fn from_iter_on_atoms_ref_fn<'s, E, I>(iter: I) -> impl FnMut(&E::Atom) -> E
+    where
+        E: 's + Expression,
+        E::Atom: Clone + PartialEq,
+        I: IntoIterator<Item = (&'s E::Atom, E)>,
+    {
+        let mut iter = iter.into_iter();
+        move |atom| from_iter_on_atoms_ref_inner(&mut iter, atom)
+    }
+
+    /// Performs substitution using data from an iterator.
+    #[inline]
+    pub fn from_iter<'s, E, I>(iter: I, expr: E) -> E
+    where
+        E: 's + Expression,
+        E::Atom: PartialEq,
+        E::Group: FromIterator<E> + IntoIterator<Item = E>,
+        I: IntoIterator<Item = (&'s E::Atom, E)>,
+    {
+        expr.substitute(from_iter_on_atoms_fn(iter))
+    }
+
+    /// Performs substitution by reference using data from an iterator.
+    #[inline]
+    pub fn from_iter_ref<'s, E, I>(iter: I, expr: &E) -> E
+    where
+        E: 's + Expression,
+        E::Atom: Clone + PartialEq,
+        E::Group: FromIterator<E>,
+        I: IntoIterator<Item = (&'s E::Atom, E)>,
+    {
+        expr.substitute_ref(from_iter_on_atoms_ref_fn(iter))
+    }
+
+    /// Returns a function which performs substitution using data from an iterator.
+    #[inline]
+    pub fn from_iter_fn<'s, E, I>(iter: I) -> impl FnOnce(E) -> E
+    where
+        E: 's + Expression,
+        E::Atom: PartialEq,
+        E::Group: FromIterator<E> + IntoIterator<Item = E>,
+        I: IntoIterator<Item = (&'s E::Atom, E)>,
+    {
+        move |expr| from_iter(iter, expr)
+    }
+
+    /// Returns a function which performs substitution by reference using data from an iterator.
+    #[inline]
+    pub fn from_iter_ref_fn<'s, E, I>(iter: I) -> impl FnOnce(&E) -> E
+    where
+        E: 's + Expression,
+        E::Atom: Clone + PartialEq,
+        E::Group: FromIterator<E>,
+        I: IntoIterator<Item = (&'s E::Atom, E)>,
+    {
+        move |expr| from_iter_ref(iter, expr)
+    }
 
     /// Substitution Term Reference Type
     #[derive(Clone, Copy, Debug)]
