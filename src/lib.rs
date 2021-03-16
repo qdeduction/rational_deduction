@@ -30,7 +30,10 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub mod prelude {
     pub use {
         crate::{self as rd, rule::Rule, substitution::Substitution, Structure},
-        exprz::{self, Expr, ExprRef, Expression, Group, GroupRef, GroupReference, Reference},
+        exprz::{
+            self, Expr, ExprRef, Expression, Group, GroupRef, GroupRefItem, GroupReference,
+            Reference,
+        },
     };
 }
 
@@ -543,12 +546,12 @@ pub mod rule {
                 reference
                     .top
                     .iter()
-                    .map(move |e| E::from_expr(e.cases().into()))
+                    .map(super::Reference::to_owned)
                     .collect(),
                 reference
                     .bot
                     .iter()
-                    .map(move |e| E::from_expr(e.cases().into()))
+                    .map(super::Reference::to_owned)
                     .collect(),
             )
         }
@@ -1415,10 +1418,10 @@ pub mod substitution {
                 generate_from_atoms(*lhs_atom, *rhs_atom, can_substitute)
             }
             (ExprRef::Atom(lhs), _) if can_substitute(lhs) => Some(Directed::Forward(
-                Term::new((*lhs).clone(), E::from_expr(rhs.into())).unit(),
+                Term::new((*lhs).clone(), rhs.to_owned()).unit(),
             )),
             (_, ExprRef::Atom(rhs)) if can_substitute(rhs) => Some(Directed::Backward(
-                Term::new((*rhs).clone(), E::from_expr(lhs.into())).unit(),
+                Term::new((*rhs).clone(), lhs.to_owned()).unit(),
             )),
             (ExprRef::Group(lhs), ExprRef::Group(rhs)) => {
                 generate_from_groups(lhs, rhs, can_substitute)
