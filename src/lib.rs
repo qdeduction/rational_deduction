@@ -393,8 +393,8 @@ pub mod rule {
             // FIXME: use `unwrap_unchecked` when it comes out
             let mut iter = self.base.iter();
             (
-                iter.next().unwrap().cases().unwrap_group(),
-                iter.next().unwrap().cases().unwrap_group(),
+                iter.next().unwrap().unwrap_group(),
+                iter.next().unwrap().unwrap_group(),
             )
         }
     }
@@ -612,8 +612,8 @@ pub mod rule {
     {
         let mut iter = group.iter();
         match (
-            iter.next().map(move |e| e.cases().is_group()),
-            iter.next().map(move |e| e.cases().is_group()),
+            iter.next().map(super::Reference::is_group),
+            iter.next().map(super::Reference::is_group),
             iter.next(),
         ) {
             (Some(top), Some(bot), None) => match (top, bot) {
@@ -1224,6 +1224,47 @@ pub mod substitution {
         BadGroupShape,
     }
 
+    /// Checks if an atom matches the `Substitution` pattern.
+    #[inline]
+    pub fn matches_atom<E>(atom: &E::Atom) -> Result<(), StructureError>
+    where
+        E: Expression,
+    {
+        let _ = atom;
+        Err(StructureError::NotGroup)
+    }
+
+    /// Checks if a group matches the `Substitution` pattern.
+    #[inline]
+    pub fn matches_group<E>(group: &GroupRef<E>) -> Result<(), StructureError>
+    where
+        E: Expression,
+    {
+        for pair in util::by_pairs(group.iter()) {
+            match pair {
+                Some((var, _)) => {
+                    if !var.is_atom() {
+                        return Err(StructureError::BadGroupShape);
+                    }
+                }
+                _ => return Err(StructureError::NotGroupedInPairs),
+            }
+        }
+        Ok(())
+    }
+
+    /// Checks if an expression matches the `Substitution` pattern.
+    #[inline]
+    pub fn matches<E>(expr: &ExprRef<E>) -> Result<(), StructureError>
+    where
+        E: Expression,
+    {
+        match expr {
+            ExprRef::Atom(atom) => matches_atom::<E>(atom),
+            ExprRef::Group(group) => matches_group::<E>(group),
+        }
+    }
+
     impl<E, V> Matcher<E> for Structure<E, V>
     where
         E: Expression,
@@ -1233,22 +1274,11 @@ pub mod substitution {
 
         #[inline]
         fn matches_atom(atom: &E::Atom) -> Result<(), Self::Error> {
-            let _ = atom;
-            Err(Self::Error::NotGroup)
+            matches_atom::<E>(atom)
         }
 
         fn matches_group(group: GroupRef<E>) -> Result<(), Self::Error> {
-            for pair in util::by_pairs(group.iter()) {
-                match pair {
-                    Some((var, _)) => {
-                        if !var.cases().is_atom() {
-                            return Err(Self::Error::BadGroupShape);
-                        }
-                    }
-                    _ => return Err(Self::Error::NotGroupedInPairs),
-                }
-            }
-            Ok(())
+            matches_group::<E>(&group)
         }
     }
 
