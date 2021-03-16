@@ -1035,6 +1035,7 @@ pub mod substitution {
     }
 
     /// Substitution Trait
+    // TODO: add iterator over `vars` and `exprs` which compute from `iter`
     pub trait Substitution<E, V = Vec<Term<E>>>: super::Structure<E, Structure<E, V>>
     where
         E: Expression,
@@ -1075,7 +1076,7 @@ pub mod substitution {
 
         /// Returns corresponding expression which `var` completes to under substitution.
         #[inline]
-        fn get_new(&self, var: &E::Atom) -> Option<E>
+        fn get_owned(&self, var: &E::Atom) -> Option<E>
         where
             E::Atom: Clone + PartialEq,
             E::Group: FromIterator<E>,
@@ -1090,7 +1091,7 @@ pub mod substitution {
             E::Atom: Clone + PartialEq,
             E::Group: FromIterator<E>,
         {
-            self.get_new(&atom)
+            self.get_owned(&atom)
                 .unwrap_or_else(move || E::from_atom(atom))
         }
 
@@ -1101,7 +1102,7 @@ pub mod substitution {
             E::Atom: Clone + PartialEq,
             E::Group: FromIterator<E>,
         {
-            self.get_new(&atom)
+            self.get_owned(&atom)
                 .unwrap_or_else(move || E::from_atom(atom.clone()))
         }
 
@@ -1126,14 +1127,15 @@ pub mod substitution {
         }
 
         /// Tries to generate a substitution from two expressions.
+        // FIXME: find a way to accept `&E` or `ExprRef<E>`
         #[inline]
-        fn generate<F>(lhs: &E, rhs: &E, mut can_substitute: F) -> Option<Directed<Self>>
+        fn generate<F>(lhs: &E, rhs: &E, can_substitute: F) -> Option<Directed<Self>>
         where
             Self: Sized,
             E::Atom: Clone + PartialEq,
             F: FnMut(&E::Atom) -> bool,
         {
-            generate::<_, Structure<_, V>, _>(lhs, rhs, &mut can_substitute)
+            generate::<_, Structure<_, V>, _>(lhs, rhs, can_substitute)
                 .map(move |d| d.map(Self::from))
         }
     }
@@ -1218,7 +1220,7 @@ pub mod substitution {
         NotGroupedInPairs,
 
         /// The expression does not have the right group shape.
-        // TODO: return all of `var` that were not atoms
+        // TODO: return all of `var` that were not atoms?
         BadGroupShape,
     }
 
@@ -1361,10 +1363,30 @@ pub mod substitution {
             }
         }
 
+        /// Returns `Some` with the inner substitution if `self` is `Forward`.
+        #[must_use]
+        #[inline]
+        pub fn forward_ref(&self) -> Option<&S> {
+            match self {
+                Self::Forward(substitution) => Some(substitution),
+                _ => None,
+            }
+        }
+
         /// Returns `Some` with the inner substitution if `self` is `Backward`.
         #[must_use]
         #[inline]
         pub fn backward(self) -> Option<S> {
+            match self {
+                Self::Backward(substitution) => Some(substitution),
+                _ => None,
+            }
+        }
+
+        /// Returns `Some` with the inner substitution if `self` is `Backward`.
+        #[must_use]
+        #[inline]
+        pub fn backward_ref(&self) -> Option<&S> {
             match self {
                 Self::Backward(substitution) => Some(substitution),
                 _ => None,
@@ -1408,53 +1430,10 @@ pub mod substitution {
         }
     }
 
-    /// Tries to generate a substitution from two expressions.
-    #[inline]
-    pub fn generate<E, S, F>(lhs: &E, rhs: &E, mut can_substitute: F) -> Option<Directed<S>>
-    where
-        E: Expression,
-        E::Atom: Clone + PartialEq,
-        E::Group: FromIterator<E>,
-        S: FromIterator<Term<E>> + IntoIterator<Item = Term<E>>,
-        F: FnMut(&E::Atom) -> bool,
-    {
-        generate_inner(lhs.cases(), rhs.cases(), &mut can_substitute)
-    }
-
-    fn generate_inner<E, S, F>(
-        lhs: ExprRef<'_, E>,
-        rhs: ExprRef<'_, E>,
-        can_substitute: &mut F,
-    ) -> Option<Directed<S>>
-    where
-        E: Expression,
-        E::Atom: Clone + PartialEq,
-        E::Group: FromIterator<E>,
-        S: FromIterator<Term<E>> + IntoIterator<Item = Term<E>>,
-        F: FnMut(&E::Atom) -> bool,
-    {
-        match (&lhs, &rhs) {
-            (ExprRef::Atom(lhs_atom), ExprRef::Atom(rhs_atom)) => {
-                generate_from_atoms(*lhs_atom, *rhs_atom, can_substitute)
-            }
-            (ExprRef::Atom(lhs), _) if can_substitute(lhs) => Some(Directed::Forward(
-                Term::new((*lhs).clone(), rhs.to_owned()).unit(),
-            )),
-            (_, ExprRef::Atom(rhs)) if can_substitute(rhs) => Some(Directed::Backward(
-                Term::new((*rhs).clone(), lhs.to_owned()).unit(),
-            )),
-            (ExprRef::Group(lhs), ExprRef::Group(rhs)) => {
-                generate_from_groups(lhs, rhs, can_substitute)
-            }
-            _ => None,
-        }
-    }
-
-    /// Tries to generate a substitution from two atomic expressions.
-    pub fn generate_from_atoms<E, S, F>(
+    fn generate_from_atoms_inner<E, S, F>(
         lhs: &E::Atom,
         rhs: &E::Atom,
-        mut can_substitute: F,
+        can_substitute: &mut F,
     ) -> Option<Directed<S>>
     where
         E: Expression,
@@ -1478,11 +1457,10 @@ pub mod substitution {
         }
     }
 
-    /// Tries to generate a substitution from two grouped expressions.
-    pub fn generate_from_groups<E, S, F>(
+    fn generate_from_groups_inner<E, S, F>(
         lhs: &GroupRef<E>,
         rhs: &GroupRef<E>,
-        mut can_substitute: F,
+        can_substitute: &mut F,
     ) -> Option<Directed<S>>
     where
         E: Expression,
@@ -1498,7 +1476,7 @@ pub mod substitution {
         let mut lhs_iter = lhs.iter();
         let mut rhs_iter = rhs.iter();
         for (lhs, rhs) in lhs_iter.by_ref().zip(rhs_iter.by_ref()) {
-            match generate_inner::<_, S, _>(lhs.cases(), rhs.cases(), &mut can_substitute) {
+            match generate_inner::<_, S, _>(lhs.cases(), rhs.cases(), can_substitute) {
                 Some(generated) => {
                     let (is_forward, generated) = generated.unpack();
                     if !is_forward {
@@ -1538,6 +1516,84 @@ pub mod substitution {
                     .collect(),
             ))
         }
+    }
+
+    fn generate_inner<E, S, F>(
+        lhs: ExprRef<'_, E>,
+        rhs: ExprRef<'_, E>,
+        can_substitute: &mut F,
+    ) -> Option<Directed<S>>
+    where
+        E: Expression,
+        E::Atom: Clone + PartialEq,
+        E::Group: FromIterator<E>,
+        S: FromIterator<Term<E>> + IntoIterator<Item = Term<E>>,
+        F: FnMut(&E::Atom) -> bool,
+    {
+        match (&lhs, &rhs) {
+            (ExprRef::Atom(lhs_atom), ExprRef::Atom(rhs_atom)) => {
+                generate_from_atoms(*lhs_atom, *rhs_atom, can_substitute)
+            }
+            (ExprRef::Atom(lhs), _) if can_substitute(lhs) => Some(Directed::Forward(
+                Term::new((*lhs).clone(), rhs.to_owned()).unit(),
+            )),
+            (_, ExprRef::Atom(rhs)) if can_substitute(rhs) => Some(Directed::Backward(
+                Term::new((*rhs).clone(), lhs.to_owned()).unit(),
+            )),
+            (ExprRef::Group(lhs), ExprRef::Group(rhs)) => {
+                generate_from_groups_inner(lhs, rhs, can_substitute)
+            }
+            _ => None,
+        }
+    }
+
+    /// Tries to generate a substitution from two atomic expressions.
+    #[inline]
+    pub fn generate_from_atoms<E, S, F>(
+        lhs: &E::Atom,
+        rhs: &E::Atom,
+        mut can_substitute: F,
+    ) -> Option<Directed<S>>
+    where
+        E: Expression,
+        E::Atom: Clone + PartialEq,
+        E::Group: FromIterator<E>,
+        S: FromIterator<Term<E>> + IntoIterator<Item = Term<E>>,
+        F: FnMut(&E::Atom) -> bool,
+    {
+        generate_from_atoms_inner(lhs, rhs, &mut can_substitute)
+    }
+
+    /// Tries to generate a substitution from two grouped expressions.
+    // FIXME: find a way to accept `&E::Group` or `GroupRef<E>`
+    #[inline]
+    pub fn generate_from_groups<E, S, F>(
+        lhs: &GroupRef<E>,
+        rhs: &GroupRef<E>,
+        mut can_substitute: F,
+    ) -> Option<Directed<S>>
+    where
+        E: Expression,
+        E::Atom: Clone + PartialEq,
+        E::Group: FromIterator<E>,
+        S: FromIterator<Term<E>> + IntoIterator<Item = Term<E>>,
+        F: FnMut(&E::Atom) -> bool,
+    {
+        generate_from_groups_inner(lhs, rhs, &mut can_substitute)
+    }
+
+    /// Tries to generate a substitution from two expressions.
+    // FIXME: find a way to accept `&E` or `ExprRef<E>`
+    #[inline]
+    pub fn generate<E, S, F>(lhs: &E, rhs: &E, mut can_substitute: F) -> Option<Directed<S>>
+    where
+        E: Expression,
+        E::Atom: Clone + PartialEq,
+        E::Group: FromIterator<E>,
+        S: FromIterator<Term<E>> + IntoIterator<Item = Term<E>>,
+        F: FnMut(&E::Atom) -> bool,
+    {
+        generate_inner(lhs.cases(), rhs.cases(), &mut can_substitute)
     }
 }
 
