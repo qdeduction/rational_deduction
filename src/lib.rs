@@ -13,14 +13,13 @@ extern crate alloc;
 
 use {
     core::{
-        borrow::Borrow,
         convert::{Infallible, TryFrom, TryInto},
         iter::FromIterator,
         marker::PhantomData,
     },
     exprz::{
-        iter::{IntoIteratorGen, IteratorGen},
         shape::{Matcher, Shape},
+        Reference as _,
     },
 };
 
@@ -28,7 +27,7 @@ use {
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 pub use {
-    exprz::{self, Expr, ExprRef, Expression},
+    exprz::{self, Expr, ExprRef, Expression, Group, GroupRef, GroupReference},
     rule::Rule,
     substitution::Substitution,
 };
@@ -152,6 +151,22 @@ pub mod rule {
             .unwrap_or_else(R::default)
     }
 
+    /// Returns `true` if the two ratios are equal pointwise.
+    #[inline]
+    pub fn eq<'e, E>(
+        lhs_top: &GroupRef<'e, E>,
+        lhs_bot: &GroupRef<'e, E>,
+        rhs_top: &GroupRef<'e, E>,
+        rhs_bot: &GroupRef<'e, E>,
+    ) -> bool
+    where
+        E: Expression,
+        E::Atom: PartialEq,
+    {
+        ExprRef::<E>::eq_groups::<E>(lhs_top, rhs_top)
+            && ExprRef::<E>::eq_groups::<E>(lhs_bot, rhs_bot)
+    }
+
     /// Rule Trait
     // TODO: `eq_by_symmetric_cancellation`
     // TODO: `has_cancellation`
@@ -165,16 +180,19 @@ pub mod rule {
         fn cases(&self) -> Reference<E>;
 
         /// Returns a reference to the top element of the rule.
-        fn top(&self) -> <E::Group as IntoIteratorGen<E>>::IterGen<'_> {
+        #[inline]
+        fn top(&self) -> GroupRef<E> {
             self.cases().top
         }
 
         /// Returns a reference to the bottom element of the rule.
-        fn bot(&self) -> <E::Group as IntoIteratorGen<E>>::IterGen<'_> {
+        #[inline]
+        fn bot(&self) -> GroupRef<E> {
             self.cases().bot
         }
 
-        /// Returns `true` if two rules are equal.
+        /// Returns `true` if the two rules are equal pointwise.
+        #[inline]
         fn eq<R>(&self, other: &R) -> bool
         where
             E::Atom: PartialEq,
@@ -184,6 +202,7 @@ pub mod rule {
         }
 
         /// Clones a rule.
+        #[inline]
         fn clone(&self) -> Self
         where
             Self: Sized,
@@ -194,6 +213,7 @@ pub mod rule {
         }
 
         /// Builds a new `Rule` from two groups.
+        #[inline]
         fn new(top: E::Group, bot: E::Group) -> Self
         where
             Self: Sized,
@@ -202,6 +222,7 @@ pub mod rule {
         }
 
         /// Builds the default `Rule`.
+        #[inline]
         fn default() -> Self
         where
             Self: Sized,
@@ -210,12 +231,18 @@ pub mod rule {
         }
 
         /// Returns the top and bottom element of the rule as a pair.
-        fn pair(self) -> (E::Group, E::Group)
+        #[inline]
+        fn pair(self) -> Pair<E>
         where
             Self: Sized,
         {
-            let Structure { top, bot } = self.structure();
-            (top, bot)
+            self.structure().pair()
+        }
+
+        /// Returns the top and bottom element of the rule as a pair.
+        #[inline]
+        fn ref_pair(&self) -> RefPair<E> {
+            self.cases().ref_pair()
         }
     }
 
@@ -225,10 +252,10 @@ pub mod rule {
         E: 'e + Expression,
     {
         /// Top element of the rule
-        pub top: <E::Group as IntoIteratorGen<E>>::IterGen<'e>,
+        pub top: GroupRef<'e, E>,
 
         /// Bottom element of the rule
-        pub bot: <E::Group as IntoIteratorGen<E>>::IterGen<'e>,
+        pub bot: GroupRef<'e, E>,
     }
 
     impl<'e, E> Reference<'e, E>
@@ -237,23 +264,49 @@ pub mod rule {
     {
         /// Builds a new `Reference` from references to the top and bottom of a rule.
         #[inline]
-        pub fn new(
-            top: <E::Group as IntoIteratorGen<E>>::IterGen<'e>,
-            bot: <E::Group as IntoIteratorGen<E>>::IterGen<'e>,
-        ) -> Self {
+        pub fn new(top: GroupRef<'e, E>, bot: GroupRef<'e, E>) -> Self {
             Self { top, bot }
         }
+
+        /// Returns the top and bottom element of the rule as a pair.
+        #[inline]
+        pub fn ref_pair(self) -> RefPair<'e, E> {
+            (self.top, self.bot)
+        }
+
+        /// Returns the top and bottom element of the rule as a pair.
+        #[inline]
+        pub fn ref_pair_by_ref(&self) -> (&GroupRef<'e, E>, &GroupRef<'e, E>) {
+            (&self.top, &self.bot)
+        }
+    }
+
+    impl<'e, E> Clone for Reference<'e, E>
+    where
+        E: Expression,
+        GroupRef<'e, E>: Clone,
+    {
+        #[inline]
+        fn clone(&self) -> Self {
+            Self::new(self.top.clone(), self.bot.clone())
+        }
+    }
+
+    impl<'e, E> Copy for Reference<'e, E>
+    where
+        E: Expression,
+        GroupRef<'e, E>: Copy,
+    {
     }
 
     impl<'e, E> PartialEq for Reference<'e, E>
     where
-        E: 'e + Expression,
+        E: Expression,
         E::Atom: PartialEq,
     {
         #[inline]
         fn eq(&self, other: &Self) -> bool {
-            ExprRef::<E>::eq_groups::<E>(&self.top, &other.top)
-                && ExprRef::<E>::eq_groups::<E>(&self.bot, &other.bot)
+            eq::<E>(&self.top, &self.bot, &other.top, &other.bot)
         }
     }
 
@@ -262,6 +315,126 @@ pub mod rule {
         E: Expression,
         E::Atom: PartialEq,
     {
+    }
+
+    impl<'e, E> From<&'e Structure<E>> for Reference<'e, E>
+    where
+        E: Expression,
+    {
+        #[inline]
+        fn from(structure: &'e Structure<E>) -> Self {
+            Self::new(structure.top.reference(), structure.bot.reference())
+        }
+    }
+
+    /// Based Rule Reference Structure Type
+    pub struct BasedReference<'e, E>
+    where
+        E: 'e + Expression,
+    {
+        /// Base Group Reference
+        pub base: GroupRef<'e, E>,
+    }
+
+    impl<'e, E> BasedReference<'e, E>
+    where
+        E: Expression,
+    {
+        /// Builds a new `BasedReference` from a `base` group reference.
+        ///
+        /// # Safety
+        ///
+        /// This function does not perform any checks to ensure that the `base` group reference
+        /// points to a valid `Rule` structure. The `BasedReference::top` and `BasedReference::bot`
+        /// methods will panic if the `base` reference is not valid.
+        #[inline]
+        pub fn new(base: GroupRef<'e, E>) -> Self {
+            Self { base }
+        }
+
+        /// Returns the top element of the rule.
+        ///
+        /// # Panics
+        ///
+        /// This function panics if the `self.base` reference does not point to a valid rule object.
+        #[inline]
+        pub fn top(&self) -> GroupRef<E> {
+            self.ref_pair().0
+        }
+
+        /// Returns the bottom element of the rule.
+        ///
+        /// # Panics
+        ///
+        /// This function panics if the `self.base` reference does not point to a valid rule object.
+        #[inline]
+        pub fn bot(&self) -> GroupRef<E> {
+            self.ref_pair().1
+        }
+
+        /// Returns the top and bottom element of the rule as a pair.
+        ///
+        /// # Panics
+        ///
+        /// This function panics if the `self.base` reference does not point to a valid rule object.
+        #[inline]
+        pub fn ref_pair(&self) -> RefPair<E> {
+            // FIXME: use `unwrap_unchecked` when it comes out
+            let mut iter = self.base.iter();
+            (
+                iter.next().unwrap().cases().unwrap_group(),
+                iter.next().unwrap().cases().unwrap_group(),
+            )
+        }
+    }
+
+    impl<'e, E> Clone for BasedReference<'e, E>
+    where
+        E: Expression,
+        GroupRef<'e, E>: Clone,
+    {
+        #[inline]
+        fn clone(&self) -> Self {
+            Self::new(self.base.clone())
+        }
+    }
+
+    impl<'e, E> Copy for BasedReference<'e, E>
+    where
+        E: Expression,
+        GroupRef<'e, E>: Copy,
+    {
+    }
+
+    impl<'e, E> PartialEq for BasedReference<'e, E>
+    where
+        E: Expression,
+        E::Atom: PartialEq,
+    {
+        #[inline]
+        fn eq(&self, other: &Self) -> bool {
+            eq::<E>(&self.top(), &self.bot(), &other.top(), &other.bot())
+        }
+    }
+
+    impl<'e, E> Eq for BasedReference<'e, E>
+    where
+        E: Expression,
+        E::Atom: PartialEq,
+    {
+    }
+
+    impl<'e, E> TryFrom<ExprRef<'e, E>> for BasedReference<'e, E>
+    where
+        E: Expression,
+    {
+        type Error = <Structure<E> as Matcher<E>>::Error;
+
+        #[inline]
+        fn try_from(expr: ExprRef<'e, E>) -> Result<Self, Self::Error> {
+            matches(&expr)?;
+            Ok(Self::new(expr.unwrap_group()))
+        }
     }
 
     /// Rule Structure Type
@@ -286,6 +459,18 @@ pub mod rule {
         pub fn new(top: E::Group, bot: E::Group) -> Self {
             Self { top, bot }
         }
+
+        /// Returns the `Structure` as a `Pair`.
+        #[inline]
+        pub fn pair(self) -> Pair<E> {
+            (self.top, self.bot)
+        }
+
+        /// Returns the `Structure` as a pair of references.
+        #[inline]
+        pub fn pair_by_ref(&self) -> (&E::Group, &E::Group) {
+            (&self.top, &self.bot)
+        }
     }
 
     impl<E> Default for Structure<E>
@@ -299,41 +484,6 @@ pub mod rule {
         }
     }
 
-    impl<'e, E> From<Reference<'e, E>> for Structure<E>
-    where
-        E: 'e + Expression,
-        E::Atom: Clone,
-        E::Group: FromIterator<E>,
-    {
-        #[must_use]
-        #[inline]
-        fn from(reference: Reference<'e, E>) -> Self {
-            // FIXME: move this "algorithm" to `ExprZ`
-            Self::new(
-                reference
-                    .top
-                    .iter()
-                    .map(move |e| e.borrow().clone())
-                    .collect(),
-                reference
-                    .bot
-                    .iter()
-                    .map(move |e| e.borrow().clone())
-                    .collect(),
-            )
-        }
-    }
-
-    impl<'e, E> From<&'e Structure<E>> for Reference<'e, E>
-    where
-        E: Expression,
-    {
-        #[inline]
-        fn from(reference: &'e Structure<E>) -> Self {
-            Self::new(reference.top.gen(), reference.bot.gen())
-        }
-    }
-
     impl<E> Clone for Structure<E>
     where
         E: Expression,
@@ -344,6 +494,14 @@ pub mod rule {
         fn clone(&self) -> Self {
             Reference::from(self).into()
         }
+    }
+
+    impl<E> Copy for Structure<E>
+    where
+        E: Expression,
+        E::Atom: Clone,
+        E::Group: Copy + FromIterator<E>,
+    {
     }
 
     impl<E> PartialEq for Structure<E>
@@ -364,11 +522,38 @@ pub mod rule {
     {
     }
 
+    impl<'e, E> From<Reference<'e, E>> for Structure<E>
+    where
+        E: Expression,
+        E::Atom: Clone,
+        E::Group: FromIterator<E>,
+    {
+        #[must_use]
+        #[inline]
+        fn from(reference: Reference<'e, E>) -> Self {
+            // FIXME: move this "algorithm" to `ExprZ`
+            Self::new(
+                reference
+                    .top
+                    .iter()
+                    .map(move |e| E::from_expr(e.cases().into()))
+                    .collect(),
+                reference
+                    .bot
+                    .iter()
+                    .map(move |e| E::from_expr(e.cases().into()))
+                    .collect(),
+            )
+        }
+    }
+
     impl<E> From<Structure<E>> for Expr<E>
     where
         E: Expression,
         E::Group: FromIterator<E>,
     {
+        #[must_use]
+        #[inline]
         fn from(structure: Structure<E>) -> Self {
             Self::Group(
                 util::two_item_iter(structure.top, structure.bot)
@@ -397,6 +582,50 @@ pub mod rule {
         MissingTopBotGroups,
     }
 
+    /// Checks if an atom matches the `Rule` pattern.
+    #[inline]
+    pub fn matches_atom<E>(atom: &E::Atom) -> Result<(), StructureError>
+    where
+        E: Expression,
+    {
+        let _ = atom;
+        Err(StructureError::NotGroup)
+    }
+
+    /// Checks if a group matches the `Rule` pattern.
+    #[inline]
+    pub fn matches_group<E>(group: &GroupRef<E>) -> Result<(), StructureError>
+    where
+        E: Expression,
+    {
+        let mut iter = group.iter();
+        match (
+            iter.next().map(move |e| e.cases().is_group()),
+            iter.next().map(move |e| e.cases().is_group()),
+            iter.next(),
+        ) {
+            (Some(top), Some(bot), None) => match (top, bot) {
+                (true, true) => Ok(()),
+                (true, false) => Err(StructureError::MissingBotGroup),
+                (false, true) => Err(StructureError::MissingTopGroup),
+                _ => Err(StructureError::MissingTopBotGroups),
+            },
+            _ => Err(StructureError::BadGroupShape),
+        }
+    }
+
+    /// Checks if an expression matches the `Rule` pattern.
+    #[inline]
+    pub fn matches<E>(expr: &ExprRef<E>) -> Result<(), StructureError>
+    where
+        E: Expression,
+    {
+        match expr {
+            ExprRef::Atom(atom) => matches_atom::<E>(atom),
+            ExprRef::Group(group) => matches_group::<E>(group),
+        }
+    }
+
     impl<E> Matcher<E> for Structure<E>
     where
         E: Expression,
@@ -405,26 +634,12 @@ pub mod rule {
 
         #[inline]
         fn matches_atom(atom: &E::Atom) -> Result<(), Self::Error> {
-            let _ = atom;
-            Err(Self::Error::NotGroup)
+            matches_atom::<E>(atom)
         }
 
         #[inline]
-        fn matches_group(
-            group: <E::Group as IntoIteratorGen<E>>::IterGen<'_>,
-        ) -> Result<(), Self::Error> {
-            let mut iter = group.iter();
-            match (iter.next(), iter.next(), iter.next()) {
-                (Some(top), Some(bot), None) => {
-                    match (top.borrow().is_group(), bot.borrow().is_group()) {
-                        (true, true) => Ok(()),
-                        (true, false) => Err(Self::Error::MissingBotGroup),
-                        (false, true) => Err(Self::Error::MissingTopGroup),
-                        _ => Err(Self::Error::MissingTopBotGroups),
-                    }
-                }
-                _ => Err(Self::Error::BadGroupShape),
-            }
+        fn matches_group(group: GroupRef<E>) -> Result<(), Self::Error> {
+            matches_group::<E>(&group)
         }
     }
 
@@ -471,6 +686,12 @@ pub mod rule {
             self.into()
         }
     }
+
+    /// Rule Reference Pair Type
+    pub type RefPair<'e, E> = (GroupRef<'e, E>, GroupRef<'e, E>);
+
+    /// Rule Pair Type
+    pub type Pair<E> = (<E as Expression>::Group, <E as Expression>::Group);
 }
 
 /// Substitution Module
@@ -984,13 +1205,11 @@ pub mod substitution {
             Err(Self::Error::NotGroup)
         }
 
-        fn matches_group(
-            group: <E::Group as IntoIteratorGen<E>>::IterGen<'_>,
-        ) -> Result<(), Self::Error> {
+        fn matches_group(group: GroupRef<E>) -> Result<(), Self::Error> {
             for pair in util::by_pairs(group.iter()) {
                 match pair {
                     Some((var, _)) => {
-                        if !var.borrow().is_atom() {
+                        if !var.cases().is_atom() {
                             return Err(Self::Error::BadGroupShape);
                         }
                     }
@@ -1160,7 +1379,8 @@ pub mod substitution {
     }
 
     /// Tries to generate a substitution from two expressions.
-    pub fn generate<E, S, F>(lhs: &E, rhs: &E, can_substitute: &mut F) -> Option<Directed<S>>
+    #[inline]
+    pub fn generate<E, S, F>(lhs: &E, rhs: &E, mut can_substitute: F) -> Option<Directed<S>>
     where
         E: Expression,
         E::Atom: Clone + PartialEq,
@@ -1168,27 +1388,30 @@ pub mod substitution {
         S: FromIterator<Term<E>> + IntoIterator<Item = Term<E>>,
         F: FnMut(&E::Atom) -> bool,
     {
-        match (lhs.cases(), rhs.cases()) {
+        generate_inner(lhs.cases(), rhs.cases(), &mut can_substitute)
+    }
+
+    fn generate_inner<E, S, F>(
+        lhs: ExprRef<'_, E>,
+        rhs: ExprRef<'_, E>,
+        can_substitute: &mut F,
+    ) -> Option<Directed<S>>
+    where
+        E: Expression,
+        E::Atom: Clone + PartialEq,
+        E::Group: FromIterator<E>,
+        S: FromIterator<Term<E>> + IntoIterator<Item = Term<E>>,
+        F: FnMut(&E::Atom) -> bool,
+    {
+        match (&lhs, &rhs) {
             (ExprRef::Atom(lhs_atom), ExprRef::Atom(rhs_atom)) => {
-                if lhs_atom == rhs_atom {
-                    Some(Directed::Forward(S::from_iter(None)))
-                } else if can_substitute(lhs_atom) {
-                    Some(Directed::Forward(
-                        Term::new(lhs_atom.clone(), rhs.clone()).unit(),
-                    ))
-                } else if can_substitute(rhs_atom) {
-                    Some(Directed::Backward(
-                        Term::new(rhs_atom.clone(), lhs.clone()).unit(),
-                    ))
-                } else {
-                    None
-                }
+                generate_from_atoms(*lhs_atom, *rhs_atom, can_substitute)
             }
             (ExprRef::Atom(lhs), _) if can_substitute(lhs) => Some(Directed::Forward(
-                Term::new(lhs.clone(), rhs.clone()).unit(),
+                Term::new((*lhs).clone(), E::from_expr(rhs.into())).unit(),
             )),
             (_, ExprRef::Atom(rhs)) if can_substitute(rhs) => Some(Directed::Backward(
-                Term::new(rhs.clone(), lhs.clone()).unit(),
+                Term::new((*rhs).clone(), E::from_expr(lhs.into())).unit(),
             )),
             (ExprRef::Group(lhs), ExprRef::Group(rhs)) => {
                 generate_from_groups(lhs, rhs, can_substitute)
@@ -1197,11 +1420,39 @@ pub mod substitution {
         }
     }
 
+    /// Tries to generate a substitution from two atomic expressions.
+    pub fn generate_from_atoms<E, S, F>(
+        lhs: &E::Atom,
+        rhs: &E::Atom,
+        mut can_substitute: F,
+    ) -> Option<Directed<S>>
+    where
+        E: Expression,
+        E::Atom: Clone + PartialEq,
+        E::Group: FromIterator<E>,
+        S: FromIterator<Term<E>> + IntoIterator<Item = Term<E>>,
+        F: FnMut(&E::Atom) -> bool,
+    {
+        if lhs == rhs {
+            Some(Directed::Forward(S::from_iter(None)))
+        } else if can_substitute(lhs) {
+            Some(Directed::Forward(
+                Term::new(lhs.clone(), E::from_atom(rhs.clone())).unit(),
+            ))
+        } else if can_substitute(rhs) {
+            Some(Directed::Backward(
+                Term::new(rhs.clone(), E::from_atom(lhs.clone())).unit(),
+            ))
+        } else {
+            None
+        }
+    }
+
     /// Tries to generate a substitution from two grouped expressions.
     pub fn generate_from_groups<E, S, F>(
-        lhs: <E::Group as IntoIteratorGen<E>>::IterGen<'_>,
-        rhs: <E::Group as IntoIteratorGen<E>>::IterGen<'_>,
-        can_substitute: &mut F,
+        lhs: &GroupRef<E>,
+        rhs: &GroupRef<E>,
+        mut can_substitute: F,
     ) -> Option<Directed<S>>
     where
         E: Expression,
@@ -1217,7 +1468,7 @@ pub mod substitution {
         let mut lhs_iter = lhs.iter();
         let mut rhs_iter = rhs.iter();
         for (lhs, rhs) in lhs_iter.by_ref().zip(rhs_iter.by_ref()) {
-            match generate::<_, S, _>(lhs.borrow(), rhs.borrow(), can_substitute) {
+            match generate_inner::<_, S, _>(lhs.cases(), rhs.cases(), &mut can_substitute) {
                 Some(generated) => {
                     let (is_forward, generated) = generated.unpack();
                     if !is_forward {
@@ -1445,9 +1696,7 @@ pub mod stored {
         }
 
         #[inline]
-        fn matches_group(
-            group: <E::Group as IntoIteratorGen<E>>::IterGen<'_>,
-        ) -> Result<(), Self::Error> {
+        fn matches_group(group: GroupRef<E>) -> Result<(), Self::Error> {
             S::matches_group(group)
         }
     }
