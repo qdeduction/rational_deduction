@@ -541,19 +541,20 @@ pub mod rule {
         #[must_use]
         #[inline]
         fn from(reference: Reference<'e, E>) -> Self {
-            // FIXME: move this "algorithm" to `ExprZ`
-            Self::new(
-                reference
-                    .top
-                    .iter()
-                    .map(super::Reference::to_owned)
-                    .collect(),
-                reference
-                    .bot
-                    .iter()
-                    .map(super::Reference::to_owned)
-                    .collect(),
-            )
+            Self::new(reference.top.to_owned(), reference.bot.to_owned())
+        }
+    }
+
+    impl<'e, E> From<BasedReference<'e, E>> for Structure<E>
+    where
+        E: Expression,
+        E::Atom: Clone,
+        E::Group: FromIterator<E>,
+    {
+        #[must_use]
+        #[inline]
+        fn from(reference: BasedReference<'e, E>) -> Self {
+            Self::new(reference.top().to_owned(), reference.bot().to_owned())
         }
     }
 
