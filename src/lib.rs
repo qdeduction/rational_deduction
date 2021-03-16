@@ -26,11 +26,15 @@ use {
 /// Package Version
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-pub use {
-    exprz::{self, Expr, ExprRef, Expression, Group, GroupRef, GroupReference},
-    rule::Rule,
-    substitution::Substitution,
-};
+/// Crate Prelude Module
+pub mod prelude {
+    pub use {
+        crate::{self as rd, rule::Rule, substitution::Substitution, Structure},
+        exprz::{self, Expr, ExprRef, Expression, Group, GroupRef, GroupReference, Reference},
+    };
+}
+
+pub use prelude::*;
 
 /// Container Helper Trait
 pub trait Container<T>: FromIterator<T> + IntoIterator<Item = T> {}
@@ -50,6 +54,7 @@ where
     fn structure(self) -> S;
 
     /// Converts `self` into an instance of `E: Expression`.
+    #[inline]
     fn into(self) -> E
     where
         Self: Sized,
@@ -58,6 +63,7 @@ where
     }
 
     /// Tries to build `Self` from an instance of `E: Expression`.
+    #[inline]
     fn try_from(expr: E) -> Result<Self, S::Error>
     where
         Self: Sized,
@@ -137,6 +143,7 @@ pub mod rule {
     }
 
     /// Fold an iterator of rules using [`pair_compose_by`].
+    #[inline]
     pub fn compose_by<E, R, I, F>(rules: I, mut eq: F) -> R
     where
         E: Expression,
