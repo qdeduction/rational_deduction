@@ -8,6 +8,7 @@
 #![no_std]
 
 // FIXME: reimplement all of the incorrect `derive` traits
+// TODO: implement `Deref/Borrow/ToOwned` traits where possible
 
 extern crate alloc;
 
@@ -309,6 +310,13 @@ pub mod rule {
     {
     }
 
+    impl<'e, E> Eq for Reference<'e, E>
+    where
+        E: Expression,
+        E::Atom: PartialEq,
+    {
+    }
+
     impl<'e, E> PartialEq for Reference<'e, E>
     where
         E: Expression,
@@ -318,13 +326,6 @@ pub mod rule {
         fn eq(&self, other: &Self) -> bool {
             eq::<E>(&self.top, &self.bot, &other.top, &other.bot)
         }
-    }
-
-    impl<'e, E> Eq for Reference<'e, E>
-    where
-        E: Expression,
-        E::Atom: PartialEq,
-    {
     }
 
     impl<'e, E> From<&'e Structure<E>> for Reference<'e, E>
@@ -416,6 +417,13 @@ pub mod rule {
     {
     }
 
+    impl<'e, E> Eq for BasedReference<'e, E>
+    where
+        E: Expression,
+        E::Atom: PartialEq,
+    {
+    }
+
     impl<'e, E> PartialEq for BasedReference<'e, E>
     where
         E: Expression,
@@ -425,13 +433,6 @@ pub mod rule {
         fn eq(&self, other: &Self) -> bool {
             eq::<E>(&self.top(), &self.bot(), &other.top(), &other.bot())
         }
-    }
-
-    impl<'e, E> Eq for BasedReference<'e, E>
-    where
-        E: Expression,
-        E::Atom: PartialEq,
-    {
     }
 
     impl<'e, E> TryFrom<ExprRef<'e, E>> for BasedReference<'e, E>
@@ -483,17 +484,6 @@ pub mod rule {
         }
     }
 
-    impl<E> Default for Structure<E>
-    where
-        E: Expression,
-        E::Group: FromIterator<E>,
-    {
-        #[inline]
-        fn default() -> Self {
-            Self::new(E::Group::from_iter(None), E::Group::from_iter(None))
-        }
-    }
-
     impl<E> Clone for Structure<E>
     where
         E: Expression,
@@ -514,6 +504,24 @@ pub mod rule {
     {
     }
 
+    impl<E> Default for Structure<E>
+    where
+        E: Expression,
+        E::Group: FromIterator<E>,
+    {
+        #[inline]
+        fn default() -> Self {
+            Self::new(E::Group::from_iter(None), E::Group::from_iter(None))
+        }
+    }
+
+    impl<E> Eq for Structure<E>
+    where
+        E: Expression,
+        E::Atom: PartialEq,
+    {
+    }
+
     impl<E> PartialEq for Structure<E>
     where
         E: Expression,
@@ -523,13 +531,6 @@ pub mod rule {
         fn eq(&self, other: &Self) -> bool {
             Reference::from(self).eq(&other.into())
         }
-    }
-
-    impl<E> Eq for Structure<E>
-    where
-        E: Expression,
-        E::Atom: PartialEq,
-    {
     }
 
     impl<'e, E> From<Reference<'e, E>> for Structure<E>
@@ -874,6 +875,16 @@ pub mod substitution {
                 .atom()
                 .map_or(false, move |atom| atom == self.var)
         }
+
+        /// Returns an owned `Term`.
+        #[inline]
+        pub fn to_owned(&self) -> Term<E>
+        where
+            E::Atom: Clone,
+            E::Group: FromIterator<E>,
+        {
+            Term::new(self.var.clone(), self.expr.clone())
+        }
     }
 
     impl<'e, E> PartialEq for TermRef<'e, E>
@@ -983,6 +994,14 @@ pub mod substitution {
         fn clone(&self) -> Self {
             Self::new(self.var.clone(), self.expr.clone())
         }
+    }
+
+    impl<E> Copy for Term<E>
+    where
+        E: Copy + Expression,
+        E::Atom: Copy,
+        E::Group: FromIterator<E>,
+    {
     }
 
     impl<E> PartialEq for Term<E>
@@ -1586,10 +1605,30 @@ pub mod stored {
             }
         }
 
+        /// Converts from an `&StoredShape<E, _>` to an `Option<&E::Atom>`.
+        #[must_use]
+        #[inline]
+        pub fn key_ref(&self) -> Option<&E::Atom> {
+            match self {
+                Self::Key(key) => Some(key),
+                _ => None,
+            }
+        }
+
         /// Converts from a `StoredShape<_, S>` to an `Option<S>`.
         #[must_use]
         #[inline]
         pub fn shape(self) -> Option<S> {
+            match self {
+                Self::Shape(shape) => Some(shape),
+                _ => None,
+            }
+        }
+
+        /// Converts from a `&StoredShape<_, S>` to an `Option<&S>`.
+        #[must_use]
+        #[inline]
+        pub fn shape_ref(&self) -> Option<&S> {
             match self {
                 Self::Shape(shape) => Some(shape),
                 _ => None,
@@ -1773,19 +1812,19 @@ pub mod util {
 
     /// Checks if the two multisets share any elements.
     #[inline]
-    pub fn has_intersection<I>(left: I, right: Vec<&I::Item>) -> bool
+    pub fn has_intersection<L, RItem>(left: L, right: &[&RItem]) -> bool
     where
-        I: IntoIterator,
-        I::Item: PartialEq,
+        L: IntoIterator,
+        L::Item: PartialEq<RItem>,
     {
         has_intersection_by(left, right, PartialEq::eq)
     }
 
     /// Checks if the two multisets share any elements.
-    pub fn has_intersection_by<I, F>(left: I, right: Vec<&I::Item>, mut eq: F) -> bool
+    pub fn has_intersection_by<L, RItem, F>(left: L, right: &[&RItem], mut eq: F) -> bool
     where
-        I: IntoIterator,
-        F: FnMut(&I::Item, &I::Item) -> bool,
+        L: IntoIterator,
+        F: FnMut(&L::Item, &RItem) -> bool,
     {
         left.into_iter()
             .any(move |l| right.iter().all(|r| eq(&l, r)))
@@ -1797,7 +1836,7 @@ pub mod util {
         Some(fst).into_iter().chain(Some(snd))
     }
 
-    /// Generate an iterator that returns in pairs or returns `Some(None)` if a pair could not be formed.
+    /// Generates an iterator that returns in pairs or returns `Some(None)` if a pair could not be formed.
     #[inline]
     pub fn by_pairs<T, I>(iter: I) -> impl Iterator<Item = Option<(T, T)>>
     where
