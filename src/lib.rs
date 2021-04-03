@@ -255,6 +255,34 @@ pub mod rule {
         fn ref_pair(&self) -> RefPair<E> {
             self.cases().ref_pair()
         }
+
+        /// Performs substitution over the rule.
+        #[inline]
+        fn substitute<S>(self, substitution: &S) -> Self
+        where
+            Self: Sized,
+            E::Atom: Clone + PartialEq,
+            S: Substitution<E>,
+        {
+            // TODO: what about more general substitution methods
+            let (top, bot) = self.pair();
+            Self::new(substitution.apply_group(top), substitution.apply_group(bot))
+        }
+
+        /// Performs substitution over the rule by reference.
+        #[inline]
+        fn substitute_ref<S>(&self, substitution: &S) -> Self
+        where
+            Self: Sized,
+            E::Atom: Clone + PartialEq,
+            S: Substitution<E>,
+        {
+            // TODO: what about more general substitution methods
+            Self::new(
+                substitution.apply_group_ref(&self.top()),
+                substitution.apply_group_ref(&self.bot()),
+            )
+        }
     }
 
     /// Rule Reference Structure Type
@@ -1050,6 +1078,18 @@ pub mod substitution {
         /// Returns an iterator over the elements by reference.
         fn iter(&self) -> Self::Iter<'_>;
 
+        /// Returns an iterator over the variables by reference.
+        #[inline]
+        fn vars(&self) -> VarsIter<E, Self::Iter<'_>> {
+            VarsIter(self.iter())
+        }
+
+        /// Returns an iterator over the expressions by reference.
+        #[inline]
+        fn exprs(&self) -> ExprsIter<E, Self::Iter<'_>> {
+            ExprsIter(self.iter())
+        }
+
         /// Checks if the `Substitution` is empty.
         #[inline]
         fn is_empty(&self) -> bool {
@@ -1106,6 +1146,24 @@ pub mod substitution {
                 .unwrap_or_else(move || E::from_atom(atom.clone()))
         }
 
+        /// Performs substitution on a grouped expression.
+        fn apply_group(&self, group: E::Group) -> E::Group
+        where
+            E::Atom: Clone + PartialEq,
+            E::Group: FromIterator<E>,
+        {
+            group.substitute(move |atom| self.apply_atom(atom))
+        }
+
+        /// Performs substitution on a grouped expression by reference.
+        fn apply_group_ref(&self, group: &GroupRef<E>) -> E::Group
+        where
+            E::Atom: Clone + PartialEq,
+            E::Group: FromIterator<E>,
+        {
+            group.substitute_ref(move |atom| self.apply_atom_ref(atom))
+        }
+
         /// Performs substitution on an expression.
         #[inline]
         fn apply(&self, expr: E) -> E
@@ -1137,6 +1195,56 @@ pub mod substitution {
         {
             generate::<_, Structure<_, V>, _>(lhs, rhs, can_substitute)
                 .map(move |d| d.map(Self::from))
+        }
+    }
+
+    /// Iterator over Substitution Variables
+    #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+    pub struct VarsIter<'s, E, I>(I)
+    where
+        E: 's + Expression,
+        I: Iterator<Item = TermRef<'s, E>>;
+
+    impl<'s, E, I> Iterator for VarsIter<'s, E, I>
+    where
+        E: 's + Expression,
+        I: Iterator<Item = TermRef<'s, E>>,
+    {
+        type Item = &'s E::Atom;
+
+        #[inline]
+        fn next(&mut self) -> Option<Self::Item> {
+            self.0.next().map(move |t| t.var)
+        }
+
+        #[inline]
+        fn size_hint(&self) -> (usize, Option<usize>) {
+            self.0.size_hint()
+        }
+    }
+
+    /// Iterator over Substitution Expressions
+    #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+    pub struct ExprsIter<'s, E, I>(I)
+    where
+        E: 's + Expression,
+        I: Iterator<Item = TermRef<'s, E>>;
+
+    impl<'s, E, I> Iterator for ExprsIter<'s, E, I>
+    where
+        E: 's + Expression,
+        I: Iterator<Item = TermRef<'s, E>>,
+    {
+        type Item = &'s E;
+
+        #[inline]
+        fn next(&mut self) -> Option<Self::Item> {
+            self.0.next().map(move |t| t.expr)
+        }
+
+        #[inline]
+        fn size_hint(&self) -> (usize, Option<usize>) {
+            self.0.size_hint()
         }
     }
 
@@ -1311,24 +1419,9 @@ pub mod substitution {
 
     /// Structure Vector Reference Iterator
     #[derive(Clone)]
-    pub struct StructureVecIter<'s, E>
+    pub struct StructureVecIter<'s, E>(slice::Iter<'s, Term<E>>)
     where
-        E: Expression,
-    {
-        iter: slice::Iter<'s, Term<E>>,
-    }
-
-    impl<'s, E> StructureVecIter<'s, E>
-    where
-        E: Expression,
-    {
-        #[inline]
-        fn new(structure: &'s Structure<E>) -> Self {
-            Self {
-                iter: structure.terms.iter(),
-            }
-        }
-    }
+        E: Expression;
 
     impl<'s, E> Iterator for StructureVecIter<'s, E>
     where
@@ -1338,7 +1431,12 @@ pub mod substitution {
 
         #[inline]
         fn next(&mut self) -> Option<Self::Item> {
-            self.iter.next().map(Term::as_ref)
+            self.0.next().map(Term::as_ref)
+        }
+
+        #[inline]
+        fn size_hint(&self) -> (usize, Option<usize>) {
+            self.0.size_hint()
         }
     }
 
@@ -1354,7 +1452,7 @@ pub mod substitution {
 
         #[inline]
         fn iter(&self) -> Self::Iter<'_> {
-            StructureVecIter::new(self)
+            StructureVecIter(self.terms.iter())
         }
     }
 
