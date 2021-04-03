@@ -159,7 +159,7 @@ pub mod rule {
         let mut iter = rules.into_iter();
         iter.next()
             .map(move |r| iter.fold(r, move |t, b| pair_compose_by(t, b, &mut eq)))
-            .unwrap_or_else(R::default)
+            .unwrap_or_else(R::empty)
     }
 
     /// Returns `true` if the two ratios are equal pointwise.
@@ -232,9 +232,9 @@ pub mod rule {
             Self::from(Structure::new(top, bot))
         }
 
-        /// Builds the default `Rule`.
+        /// Builds an empty `Rule`.
         #[inline]
-        fn default() -> Self
+        fn empty() -> Self
         where
             Self: Sized,
         {
@@ -1088,6 +1088,15 @@ pub mod substitution {
         #[inline]
         fn exprs(&self) -> ExprsIter<E, Self::Iter<'_>> {
             ExprsIter(self.iter())
+        }
+
+        /// Builds an empty `Substitution`.
+        #[inline]
+        fn empty() -> Self
+        where
+            Self: Sized,
+        {
+            Self::from(Structure::from_iter(None))
         }
 
         /// Checks if the `Substitution` is empty.
