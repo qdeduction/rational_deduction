@@ -1277,12 +1277,17 @@ pub mod substitution {
 
         /// Reduces the substitution to its canonical form.
         #[inline]
-        fn canonical_form(&mut self) -> &mut Self
+        fn canonicalize(&mut self) -> &mut Self
         where
             Self: Sized,
             E::Atom: Ord,
         {
-            self.sort().dedup()
+            *self = Self::from(
+                mem::replace(self, Self::empty())
+                    .structure()
+                    .canonicalize_inner(),
+            );
+            self
         }
 
         /// Tries to generate a substitution from two expressions.
@@ -1379,7 +1384,7 @@ pub mod substitution {
 
         #[inline]
         fn push_inner(self, term: Term<E>) -> Self {
-            self.terms.into_iter().chain(Some(term)).collect()
+            self.into_iter().chain(Some(term)).collect()
         }
 
         #[inline]
@@ -1387,9 +1392,9 @@ pub mod substitution {
         where
             E::Atom: PartialEq,
         {
-            let mut terms = self.terms.into_iter().collect::<Vec<_>>();
+            let mut terms = self.into_iter().collect::<Vec<_>>();
             terms.dedup_by(move |l, r| l.var.eq(&r.var));
-            terms.into_iter().collect()
+            Self::from_iter(terms)
         }
 
         #[inline]
@@ -1397,9 +1402,21 @@ pub mod substitution {
         where
             E::Atom: Ord,
         {
-            let mut terms = self.terms.into_iter().collect::<Vec<_>>();
+            let mut terms = self.into_iter().collect::<Vec<_>>();
             terms.sort_by(move |l, r| l.var.cmp(&r.var));
-            terms.into_iter().collect()
+            Self::from_iter(terms)
+        }
+
+        #[inline]
+        fn canonicalize_inner(self) -> Self
+        where
+            E::Atom: Ord,
+        {
+            self.sort_inner()
+                .dedup_inner()
+                .into_iter()
+                .filter(move |t| !t.is_identity())
+                .collect()
         }
     }
 
@@ -1613,6 +1630,15 @@ pub mod substitution {
             E::Atom: Ord,
         {
             *self = mem::take(self).sort_inner();
+            self
+        }
+
+        #[inline]
+        fn canonicalize(&mut self) -> &mut Self
+        where
+            E::Atom: Ord,
+        {
+            *self = mem::take(self).canonicalize_inner();
             self
         }
     }
