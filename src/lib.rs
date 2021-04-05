@@ -741,7 +741,7 @@ pub mod substitution {
     use {
         super::*,
         alloc::vec::Vec,
-        core::{mem, slice},
+        core::{iter, mem, slice},
     };
 
     /// Returns the corresponding expression from the substitution iterator.
@@ -1577,6 +1577,30 @@ pub mod substitution {
     where
         E: Expression;
 
+    impl<E> AsRef<[Term<E>]> for StructureVecIter<'_, E>
+    where
+        E: Expression,
+    {
+        #[inline]
+        fn as_ref(&self) -> &[Term<E>] {
+            self.0.as_ref()
+        }
+    }
+
+    impl<'s, E> DoubleEndedIterator for StructureVecIter<'s, E>
+    where
+        E: Expression,
+    {
+        #[inline]
+        fn next_back(&mut self) -> Option<TermRef<'s, E>> {
+            self.0.next_back().map(Term::as_ref)
+        }
+    }
+
+    impl<E> ExactSizeIterator for StructureVecIter<'_, E> where E: Expression {}
+
+    impl<E> iter::FusedIterator for StructureVecIter<'_, E> where E: Expression {}
+
     impl<'s, E> Iterator for StructureVecIter<'s, E>
     where
         E: Expression,
@@ -1591,6 +1615,11 @@ pub mod substitution {
         #[inline]
         fn size_hint(&self) -> (usize, Option<usize>) {
             self.0.size_hint()
+        }
+
+        #[inline]
+        fn count(self) -> usize {
+            self.0.count()
         }
     }
 
