@@ -1063,7 +1063,6 @@ pub mod substitution {
     }
 
     /// Substitution Trait
-    // TODO: add iterator over `vars` and `exprs` which compute from `iter`
     pub trait Substitution<E, V = Vec<Term<E>>>: super::Structure<E, Structure<E, V>>
     where
         E: Expression,
@@ -1193,6 +1192,61 @@ pub mod substitution {
             expr.substitute_ref(move |atom| self.apply_atom_ref(atom))
         }
 
+        /// Extends the given substitution by one variable-expression pair.
+        #[inline]
+        fn push(&mut self, var: E::Atom, expr: E) -> &mut Self
+        where
+            Self: Sized,
+        {
+            self.push_term(Term::new(var, expr))
+        }
+
+        /// Extends the given substitution by the one term.
+        #[inline]
+        fn push_term(&mut self, term: Term<E>) -> &mut Self
+        where
+            Self: Sized,
+        {
+            *self = Self::from(
+                mem::replace(self, Self::empty())
+                    .structure()
+                    .push_inner(term),
+            );
+            self
+        }
+
+        /// Deduplicates the substitution.
+        #[inline]
+        fn dedup(&mut self) -> &mut Self
+        where
+            Self: Sized,
+            E::Atom: PartialEq,
+        {
+            *self = Self::from(mem::replace(self, Self::empty()).structure().dedup_inner());
+            self
+        }
+
+        /// Sorts the substitution by variable.
+        #[inline]
+        fn sort(&mut self) -> &mut Self
+        where
+            Self: Sized,
+            E::Atom: Ord,
+        {
+            *self = Self::from(mem::replace(self, Self::empty()).structure().sort_inner());
+            self
+        }
+
+        /// Reduces the substitution to its canonical form.
+        #[inline]
+        fn canonical_form(&mut self) -> &mut Self
+        where
+            Self: Sized,
+            E::Atom: Ord,
+        {
+            self.sort().dedup()
+        }
+
         /// Tries to generate a substitution from two expressions.
         // FIXME: find a way to accept `&E` or `ExprRef<E>`
         #[inline]
@@ -1258,7 +1312,7 @@ pub mod substitution {
     }
 
     /// Substitution Structure Type
-    #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+    #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
     pub struct Structure<E, V = Vec<Term<E>>>
     where
         E: Expression,
@@ -1283,6 +1337,42 @@ pub mod substitution {
                 terms,
                 _marker: PhantomData,
             }
+        }
+
+        #[inline]
+        fn push_inner(self, term: Term<E>) -> Self {
+            self.terms.into_iter().chain(Some(term)).collect()
+        }
+
+        #[inline]
+        fn dedup_inner(self) -> Self
+        where
+            E::Atom: PartialEq,
+        {
+            let mut terms = self.terms.into_iter().collect::<Vec<_>>();
+            terms.dedup_by(move |l, r| l.var.eq(&r.var));
+            terms.into_iter().collect()
+        }
+
+        #[inline]
+        fn sort_inner(self) -> Self
+        where
+            E::Atom: Ord,
+        {
+            let mut terms = self.terms.into_iter().collect::<Vec<_>>();
+            terms.sort_by(move |l, r| l.var.cmp(&r.var));
+            terms.into_iter().collect()
+        }
+    }
+
+    impl<E, V> Default for Structure<E, V>
+    where
+        E: Expression,
+        V: Container<Term<E>>,
+    {
+        #[inline]
+        fn default() -> Self {
+            Self::new(V::from_iter(None))
         }
     }
 
@@ -1462,6 +1552,30 @@ pub mod substitution {
         #[inline]
         fn iter(&self) -> Self::Iter<'_> {
             StructureVecIter(self.terms.iter())
+        }
+
+        #[inline]
+        fn push_term(&mut self, term: Term<E>) -> &mut Self {
+            *self = mem::take(self).push_inner(term);
+            self
+        }
+
+        #[inline]
+        fn dedup(&mut self) -> &mut Self
+        where
+            E::Atom: PartialEq,
+        {
+            *self = mem::take(self).dedup_inner();
+            self
+        }
+
+        #[inline]
+        fn sort(&mut self) -> &mut Self
+        where
+            E::Atom: Ord,
+        {
+            *self = mem::take(self).sort_inner();
+            self
         }
     }
 
