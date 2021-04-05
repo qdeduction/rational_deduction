@@ -1,4 +1,6 @@
-//! Rational Deduction Algorithm
+//! Rational Deduction
+//!
+//! _Rust implementation of the rational deduction algorithms_.
 
 #![cfg_attr(docsrs, feature(doc_cfg), deny(broken_intra_doc_links))]
 #![feature(generic_associated_types)]
@@ -898,10 +900,7 @@ pub mod substitution {
         where
             E::Atom: PartialEq,
         {
-            self.expr
-                .cases()
-                .atom()
-                .map_or(false, move |atom| atom == self.var)
+            self.expr.atom().map_or(false, move |atom| atom == self.var)
         }
 
         /// Returns an owned `Term`.
@@ -933,6 +932,16 @@ pub mod substitution {
     {
     }
 
+    impl<'e, E> From<&'e Term<E>> for TermRef<'e, E>
+    where
+        E: Expression,
+    {
+        #[inline]
+        fn from(term: &'e Term<E>) -> Self {
+            term.as_ref()
+        }
+    }
+
     /// Substitution Term Type
     #[derive(Debug)]
     pub struct Term<E>
@@ -960,6 +969,15 @@ pub mod substitution {
         #[inline]
         pub fn as_ref(&self) -> TermRef<'_, E> {
             TermRef::new(&self.var, &self.expr)
+        }
+
+        /// Builds an identity `Term`.
+        #[inline]
+        pub fn identity(atom: E::Atom) -> Self
+        where
+            E::Atom: Clone,
+        {
+            Self::new(atom.clone(), E::from_atom(atom))
         }
 
         /// Checks if `&self` is the identity substitution.
@@ -1104,6 +1122,17 @@ pub mod substitution {
             self.iter().next().is_none()
         }
 
+        /// Builds an identity `Substitution` over the iterator of atoms.
+        #[inline]
+        fn identity<I>(atoms: I) -> Self
+        where
+            Self: Sized,
+            E::Atom: Clone,
+            I: IntoIterator<Item = E::Atom>,
+        {
+            Self::from(atoms.into_iter().map(Term::identity).collect())
+        }
+
         /// Checks if all of the elements of `&self` are the identity substitution.
         #[inline]
         fn is_identity(&self) -> bool
@@ -1111,6 +1140,15 @@ pub mod substitution {
             E::Atom: PartialEq,
         {
             self.iter().all(move |t| t.is_identity())
+        }
+
+        /// Builds a unit `Substitution`.
+        #[inline]
+        fn unit(var: E::Atom, expr: E) -> Self
+        where
+            Self: Sized,
+        {
+            Self::from(Term::new(var, expr).unit())
         }
 
         /// Returns corresponding expression which `var` completes to under substitution.

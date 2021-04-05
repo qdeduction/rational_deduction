@@ -10,7 +10,7 @@
 [![Latest Version](https://img.shields.io/crates/v/rational_deduction.svg?style=flat-square)](https://crates.io/crates/rational_deduction)
 [![Documentation](https://img.shields.io/badge/docs-latest-blue?style=flat-square)](https://docs.rs/rational_deduction)
 
-_Rust implementation of the rational deduction algorithm_
+_Rust implementation of the rational deduction algorithms_
 
 </div>
 
