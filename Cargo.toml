@@ -22,12 +22,16 @@ maintenance = { status = "actively-developed" }
 # No default features enabled
 default = []
 
+# Atom-Expr Pairs
+aep = []
+
 # Enables all stable features
 stable = [
 ]
 
 # Enables all experimental features
 experimental = [
+    "aep",
     "rayon",
     "serde",
 ]

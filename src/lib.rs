@@ -94,6 +94,455 @@ where
     }
 }
 
+/// Atom-Expr Pairs
+///
+/// A base structure for `Substitution`s and `Composition`s.
+#[cfg(feature = "aep")]
+#[cfg_attr(docsrs, doc(cfg(feature = "aep")))]
+pub mod aep {
+    use {super::*, alloc::vec::Vec, core::mem};
+
+    /// AEP Pair
+    pub type Pair<E> = (<E as Expression>::Atom, E);
+
+    /// AEP Term Reference Type
+    #[derive(Clone, Copy, Debug)]
+    pub struct TermRef<'e, E>
+    where
+        E: Expression,
+    {
+        /// Atom
+        pub atom: &'e E::Atom,
+
+        /// Expression
+        pub expr: &'e E,
+    }
+
+    impl<'e, E> TermRef<'e, E>
+    where
+        E: Expression,
+    {
+        /// Builds a new AEP term reference.
+        #[inline]
+        pub fn new(atom: &'e E::Atom, expr: &'e E) -> Self {
+            Self { atom, expr }
+        }
+
+        /// Returns an owned `Term`.
+        #[inline]
+        pub fn to_owned(&self) -> Term<E>
+        where
+            E::Atom: Clone,
+            E::Group: FromIterator<E>,
+        {
+            Term::new(self.atom.clone(), self.expr.clone())
+        }
+    }
+
+    impl<'e, E> PartialEq for TermRef<'e, E>
+    where
+        E: Expression,
+        E::Atom: PartialEq,
+    {
+        #[inline]
+        fn eq(&self, other: &Self) -> bool {
+            self.atom.eq(other.atom) && self.expr.eq(other.expr)
+        }
+    }
+
+    impl<'e, E> Eq for TermRef<'e, E>
+    where
+        E: Expression,
+        E::Atom: PartialEq,
+    {
+    }
+
+    impl<'e, E> From<&'e Term<E>> for TermRef<'e, E>
+    where
+        E: Expression,
+    {
+        #[inline]
+        fn from(term: &'e Term<E>) -> Self {
+            term.as_ref()
+        }
+    }
+
+    /// AEP Term Type
+    #[derive(Debug)]
+    pub struct Term<E>
+    where
+        E: Expression,
+    {
+        /// Atom
+        pub atom: E::Atom,
+
+        /// Expression
+        pub expr: E,
+    }
+
+    impl<E> Term<E>
+    where
+        E: Expression,
+    {
+        /// Builds a new AEP term.
+        #[inline]
+        pub fn new(atom: E::Atom, expr: E) -> Self {
+            Self { atom, expr }
+        }
+
+        /// Returns the `&Term` as a `TermRef`.
+        #[inline]
+        pub fn as_ref(&self) -> TermRef<'_, E> {
+            TermRef::new(&self.atom, &self.expr)
+        }
+
+        /// Flips the term if possible.
+        #[inline]
+        pub fn flip(self) -> Option<Self> {
+            Some(Self::new(self.expr.atom()?, E::from_atom(self.atom)))
+        }
+
+        /// Tries the flip the term in place and returns `true` on success.
+        ///
+        /// # Panics
+        ///
+        /// This function could panic if the `is_atom`/`unwrap_atom` contract is faulty.
+        pub fn flip_in_place(&mut self) -> bool
+        where
+            E::Group: FromIterator<E>,
+        {
+            if self.expr.is_atom() {
+                self.expr = E::from_atom(mem::replace(
+                    &mut self.atom,
+                    mem::replace(&mut self.expr, E::default()).unwrap_atom(),
+                ));
+                true
+            } else {
+                false
+            }
+        }
+
+        #[inline]
+        fn iter(self) -> impl Iterator<Item = E> {
+            util::two_item_iter(E::from_atom(self.atom), self.expr)
+        }
+    }
+
+    impl<E> Clone for Term<E>
+    where
+        E: Expression,
+        E::Atom: Clone,
+        E::Group: FromIterator<E>,
+    {
+        #[inline]
+        fn clone(&self) -> Self {
+            Self::new(self.atom.clone(), self.expr.clone())
+        }
+    }
+
+    impl<E> Copy for Term<E>
+    where
+        E: Copy + Expression,
+        E::Atom: Copy,
+        E::Group: FromIterator<E>,
+    {
+    }
+
+    impl<E> PartialEq for Term<E>
+    where
+        E: Expression,
+        E::Atom: PartialEq,
+    {
+        #[inline]
+        fn eq(&self, other: &Self) -> bool {
+            self.as_ref().eq(&other.as_ref())
+        }
+    }
+
+    impl<E> Eq for Term<E>
+    where
+        E: Expression,
+        E::Atom: PartialEq,
+    {
+    }
+
+    impl<E> TryFrom<(E, E)> for Term<E>
+    where
+        E: Expression,
+    {
+        type Error = ();
+
+        #[inline]
+        fn try_from(pair: (E, E)) -> Result<Self, Self::Error> {
+            Ok(Self::new(pair.0.atom().ok_or(())?, pair.1))
+        }
+    }
+
+    impl<E> From<Term<E>> for Pair<E>
+    where
+        E: Expression,
+    {
+        #[inline]
+        fn from(term: Term<E>) -> Self {
+            (term.atom, term.expr)
+        }
+    }
+
+    /// AEP Structure Type
+    #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+    pub struct Structure<E, V = Vec<Term<E>>>
+    where
+        E: Expression,
+        V: Container<Term<E>>,
+    {
+        /// AEP terms
+        pub terms: V,
+
+        /// Phantom Marker
+        _marker: PhantomData<E>,
+    }
+
+    impl<E, V> Structure<E, V>
+    where
+        E: Expression,
+        V: Container<Term<E>>,
+    {
+        /// Builds a new `Structure` from a `Term` container.
+        #[inline]
+        pub fn new(terms: V) -> Self {
+            Self {
+                terms,
+                _marker: PhantomData,
+            }
+        }
+    }
+
+    impl<E, V> Default for Structure<E, V>
+    where
+        E: Expression,
+        V: Container<Term<E>>,
+    {
+        #[inline]
+        fn default() -> Self {
+            Self::new(V::from_iter(None))
+        }
+    }
+
+    impl<E, V> IntoIterator for Structure<E, V>
+    where
+        E: Expression,
+        V: Container<Term<E>>,
+    {
+        type Item = Term<E>;
+
+        type IntoIter = <V as IntoIterator>::IntoIter;
+
+        #[inline]
+        fn into_iter(self) -> Self::IntoIter {
+            self.terms.into_iter()
+        }
+    }
+
+    impl<E, V> FromIterator<Term<E>> for Structure<E, V>
+    where
+        E: Expression,
+        V: Container<Term<E>>,
+    {
+        #[inline]
+        fn from_iter<I>(iter: I) -> Self
+        where
+            I: IntoIterator<Item = Term<E>>,
+        {
+            Self::new(V::from_iter(iter))
+        }
+    }
+
+    impl<E, V> From<Structure<E, V>> for Expr<E>
+    where
+        E: Expression,
+        E::Group: FromIterator<E>,
+        V: Container<Term<E>>,
+    {
+        #[inline]
+        fn from(structure: Structure<E, V>) -> Self {
+            Self::Group(structure.into_iter().map(Term::iter).flatten().collect())
+        }
+    }
+
+    /// AEP Flat Structure Type
+    #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+    pub struct FlatStructure<E, VA = Vec<<E as Expression>::Atom>, VE = Vec<E>>
+    where
+        E: Expression,
+        VA: Container<E::Atom>,
+        VE: Container<E>,
+    {
+        /// AEP atoms
+        pub atoms: VA,
+
+        /// AEP expressions
+        pub exprs: VE,
+
+        /// Phantom Marker
+        _marker: PhantomData<E>,
+    }
+
+    impl<E, VA, VE> FlatStructure<E, VA, VE>
+    where
+        E: Expression,
+        VA: Container<E::Atom>,
+        VE: Container<E>,
+    {
+        /// Builds a new `Structure` from a `Term` container.
+        #[inline]
+        pub fn new(atoms: VA, exprs: VE) -> Self {
+            Self {
+                atoms,
+                exprs,
+                _marker: PhantomData,
+            }
+        }
+    }
+
+    impl<E, VA, VE> Default for FlatStructure<E, VA, VE>
+    where
+        E: Expression,
+        VA: Container<E::Atom>,
+        VE: Container<E>,
+    {
+        #[inline]
+        fn default() -> Self {
+            // Self::new(V::from_iter(None))
+            todo!()
+        }
+    }
+
+    impl<E, VA, VE> IntoIterator for FlatStructure<E, VA, VE>
+    where
+        E: Expression,
+        VA: Container<E::Atom>,
+        VE: Container<E>,
+    {
+        type Item = Pair<E>;
+
+        type IntoIter =
+            core::iter::Zip<<VA as IntoIterator>::IntoIter, <VE as IntoIterator>::IntoIter>;
+
+        #[inline]
+        fn into_iter(self) -> Self::IntoIter {
+            self.atoms.into_iter().zip(self.exprs.into_iter())
+        }
+    }
+
+    impl<E, VA, VE> FromIterator<Term<E>> for FlatStructure<E, VA, VE>
+    where
+        E: Expression,
+        VA: Container<E::Atom>,
+        VE: Container<E>,
+    {
+        #[inline]
+        fn from_iter<I>(iter: I) -> Self
+        where
+            I: IntoIterator<Item = Term<E>>,
+        {
+            let _ = iter;
+            // let (atoms, exprs) = iter.into_iter().map(move |t| (t.atom, t.expr)).unzip();
+            // Self::new(atoms, exprs)
+            todo!()
+        }
+    }
+
+    impl<E, VA, VE> From<FlatStructure<E, VA, VE>> for Expr<E>
+    where
+        E: Expression,
+        E::Group: FromIterator<E>,
+        VA: Container<E::Atom>,
+        VE: Container<E>,
+    {
+        #[inline]
+        fn from(structure: FlatStructure<E, VA, VE>) -> Self {
+            Self::Group(
+                structure
+                    .into_iter()
+                    .map(move |p| Term::new(p.0, p.1).iter())
+                    .flatten()
+                    .collect(),
+            )
+        }
+    }
+
+    /// AEP Shape Error Type
+    #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+    pub enum ShapeError {
+        /// The expression is not a group.
+        NotGroup,
+
+        /// The expression is not grouped in pairs.
+        NotGroupedInPairs,
+
+        /// The expression does not have the right group shape.
+        BadGroupShape(usize),
+    }
+
+    /// Checks if an atom matches the `AEP` pattern.
+    #[inline]
+    pub fn matches_atom<E>(atom: &E::Atom) -> Result<(), ShapeError>
+    where
+        E: Expression,
+    {
+        let _ = atom;
+        Err(ShapeError::NotGroup)
+    }
+
+    /// Checks if a group matches the `AEP` pattern.
+    #[inline]
+    pub fn matches_group<E>(group: &GroupRef<E>) -> Result<(), ShapeError>
+    where
+        E: Expression,
+    {
+        for (i, pair) in util::by_pairs(group.iter()).enumerate() {
+            match pair {
+                Some((var, _)) => {
+                    if !var.is_atom() {
+                        return Err(ShapeError::BadGroupShape(i));
+                    }
+                }
+                _ => return Err(ShapeError::NotGroupedInPairs),
+            }
+        }
+        Ok(())
+    }
+
+    /// Checks if an expression matches the `AEP` pattern.
+    #[inline]
+    pub fn matches<E>(expr: &ExprRef<E>) -> Result<(), ShapeError>
+    where
+        E: Expression,
+    {
+        match expr {
+            ExprRef::Atom(atom) => matches_atom::<E>(atom),
+            ExprRef::Group(group) => matches_group::<E>(group),
+        }
+    }
+
+    impl<E, V> Matcher<E> for Structure<E, V>
+    where
+        E: Expression,
+        V: Container<Term<E>>,
+    {
+        type Error = ShapeError;
+
+        #[inline]
+        fn matches_atom(atom: &E::Atom) -> Result<(), Self::Error> {
+            matches_atom::<E>(atom)
+        }
+
+        fn matches_group(group: GroupRef<E>) -> Result<(), Self::Error> {
+            matches_group::<E>(&group)
+        }
+    }
+}
+
 /// Rule Module
 pub mod rule {
     use super::*;
@@ -187,7 +636,7 @@ pub mod rule {
     pub trait Rule<E>: super::Structure<E, Structure<E>>
     where
         E: Expression,
-        E::Group: FromIterator<E> + IntoIterator<Item = E>,
+        E::Group: Container<E>,
     {
         /// Transforms `&self` into the appropriate reference structure.
         fn cases(&self) -> Reference<E>;
@@ -220,7 +669,6 @@ pub mod rule {
         where
             Self: Sized,
             E::Atom: Clone,
-            E::Group: FromIterator<E>,
         {
             Self::from(Clone::clone(&Structure::from(self.cases())))
         }
@@ -541,7 +989,7 @@ pub mod rule {
     {
         #[inline]
         fn default() -> Self {
-            Self::new(E::Group::from_iter(None), E::Group::from_iter(None))
+            Self::new(E::Group::empty(), E::Group::empty())
         }
     }
 
@@ -605,9 +1053,9 @@ pub mod rule {
         }
     }
 
-    /// Rule Structure Error Type
+    /// Rule Shape Error Type
     #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-    pub enum StructureError {
+    pub enum ShapeError {
         /// The expression is not a group.
         NotGroup,
 
@@ -626,17 +1074,17 @@ pub mod rule {
 
     /// Checks if an atom matches the `Rule` pattern.
     #[inline]
-    pub fn matches_atom<E>(atom: &E::Atom) -> Result<(), StructureError>
+    pub fn matches_atom<E>(atom: &E::Atom) -> Result<(), ShapeError>
     where
         E: Expression,
     {
         let _ = atom;
-        Err(StructureError::NotGroup)
+        Err(ShapeError::NotGroup)
     }
 
     /// Checks if a group matches the `Rule` pattern.
     #[inline]
-    pub fn matches_group<E>(group: &GroupRef<E>) -> Result<(), StructureError>
+    pub fn matches_group<E>(group: &GroupRef<E>) -> Result<(), ShapeError>
     where
         E: Expression,
     {
@@ -648,17 +1096,17 @@ pub mod rule {
         ) {
             (Some(top), Some(bot), None) => match (top, bot) {
                 (true, true) => Ok(()),
-                (true, false) => Err(StructureError::MissingBotGroup),
-                (false, true) => Err(StructureError::MissingTopGroup),
-                _ => Err(StructureError::MissingTopBotGroups),
+                (true, false) => Err(ShapeError::MissingBotGroup),
+                (false, true) => Err(ShapeError::MissingTopGroup),
+                _ => Err(ShapeError::MissingTopBotGroups),
             },
-            _ => Err(StructureError::BadGroupShape),
+            _ => Err(ShapeError::BadGroupShape),
         }
     }
 
     /// Checks if an expression matches the `Rule` pattern.
     #[inline]
-    pub fn matches<E>(expr: &ExprRef<E>) -> Result<(), StructureError>
+    pub fn matches<E>(expr: &ExprRef<E>) -> Result<(), ShapeError>
     where
         E: Expression,
     {
@@ -672,7 +1120,7 @@ pub mod rule {
     where
         E: Expression,
     {
-        type Error = StructureError;
+        type Error = ShapeError;
 
         #[inline]
         fn matches_atom(atom: &E::Atom) -> Result<(), Self::Error> {
@@ -714,14 +1162,14 @@ pub mod rule {
     impl<E> Shape<E> for Structure<E>
     where
         E: Expression,
-        E::Group: FromIterator<E> + IntoIterator<Item = E>,
+        E::Group: Container<E>,
     {
     }
 
     impl<E> Rule<E> for Structure<E>
     where
         E: Expression,
-        E::Group: FromIterator<E> + IntoIterator<Item = E>,
+        E::Group: Container<E>,
     {
         #[inline]
         fn cases(&self) -> Reference<E> {
@@ -1084,7 +1532,7 @@ pub mod substitution {
     pub trait Substitution<E, V = Vec<Term<E>>>: super::Structure<E, Structure<E, V>>
     where
         E: Expression,
-        E::Group: FromIterator<E> + IntoIterator<Item = E>,
+        E::Group: Container<E>,
         V: Container<Term<E>>,
     {
         /// Iterator over elements by reference.
@@ -1472,9 +1920,9 @@ pub mod substitution {
         }
     }
 
-    /// Substitution Structure Error Type
+    /// Substitution Shape Error Type
     #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-    pub enum StructureError {
+    pub enum ShapeError {
         /// The expression is not a group.
         NotGroup,
 
@@ -1482,34 +1930,33 @@ pub mod substitution {
         NotGroupedInPairs,
 
         /// The expression does not have the right group shape.
-        // TODO: return all of `var` that were not atoms?
-        BadGroupShape,
+        BadGroupShape(usize),
     }
 
     /// Checks if an atom matches the `Substitution` pattern.
     #[inline]
-    pub fn matches_atom<E>(atom: &E::Atom) -> Result<(), StructureError>
+    pub fn matches_atom<E>(atom: &E::Atom) -> Result<(), ShapeError>
     where
         E: Expression,
     {
         let _ = atom;
-        Err(StructureError::NotGroup)
+        Err(ShapeError::NotGroup)
     }
 
     /// Checks if a group matches the `Substitution` pattern.
     #[inline]
-    pub fn matches_group<E>(group: &GroupRef<E>) -> Result<(), StructureError>
+    pub fn matches_group<E>(group: &GroupRef<E>) -> Result<(), ShapeError>
     where
         E: Expression,
     {
-        for pair in util::by_pairs(group.iter()) {
+        for (i, pair) in util::by_pairs(group.iter()).enumerate() {
             match pair {
                 Some((var, _)) => {
                     if !var.is_atom() {
-                        return Err(StructureError::BadGroupShape);
+                        return Err(ShapeError::BadGroupShape(i));
                     }
                 }
-                _ => return Err(StructureError::NotGroupedInPairs),
+                _ => return Err(ShapeError::NotGroupedInPairs),
             }
         }
         Ok(())
@@ -1517,7 +1964,7 @@ pub mod substitution {
 
     /// Checks if an expression matches the `Substitution` pattern.
     #[inline]
-    pub fn matches<E>(expr: &ExprRef<E>) -> Result<(), StructureError>
+    pub fn matches<E>(expr: &ExprRef<E>) -> Result<(), ShapeError>
     where
         E: Expression,
     {
@@ -1532,7 +1979,7 @@ pub mod substitution {
         E: Expression,
         V: Container<Term<E>>,
     {
-        type Error = StructureError;
+        type Error = ShapeError;
 
         #[inline]
         fn matches_atom(atom: &E::Atom) -> Result<(), Self::Error> {
@@ -1555,8 +2002,11 @@ pub mod substitution {
         #[inline]
         fn try_from(expr: Expr<E>) -> Result<Self, Self::Error> {
             util::by_pairs(expr.group().ok_or(Self::Error::NotGroup)?)
-                .map(move |pair| match pair {
-                    Some(pair) => pair.try_into().map_err(move |_| Self::Error::BadGroupShape),
+                .enumerate()
+                .map(move |(i, pair)| match pair {
+                    Some(pair) => pair
+                        .try_into()
+                        .map_err(move |_| Self::Error::BadGroupShape(i)),
                     _ => Err(Self::Error::NotGroupedInPairs),
                 })
                 .collect()
@@ -1566,7 +2016,7 @@ pub mod substitution {
     impl<E, V> Shape<E> for Structure<E, V>
     where
         E: Expression,
-        E::Group: FromIterator<E> + IntoIterator<Item = E>,
+        E::Group: Container<E>,
         V: Container<Term<E>>,
     {
     }
@@ -1626,7 +2076,7 @@ pub mod substitution {
     impl<E> Substitution<E> for Structure<E>
     where
         E: Expression,
-        E::Group: FromIterator<E> + IntoIterator<Item = E>,
+        E::Group: Container<E>,
     {
         type Iter<'s>
         where
