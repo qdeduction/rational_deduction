@@ -34,8 +34,8 @@ pub mod prelude {
     pub use {
         crate::{self as rd, rule::Rule, substitution::Substitution, Structure},
         exprz::{
-            self, Expr, ExprRef, Expression, Group, GroupRef, GroupRefItem, GroupReference,
-            Reference,
+            self, Expr, ExprRef, Expression, Group, GroupRef, GroupRefItem, GroupRefIter,
+            GroupReference, Reference,
         },
     };
 }
