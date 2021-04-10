@@ -7,7 +7,7 @@
 #![feature(exhaustive_patterns)]
 #![allow(incomplete_features)]
 #![forbid(unsafe_code)]
-#![no_std]
+// #![no_std]
 
 // FIXME: reimplement all of the incorrect `derive` traits
 // TODO: implement `Deref/Borrow/ToOwned` traits where possible
@@ -573,7 +573,7 @@ pub mod rule {
     {
         let top = top.structure();
         let bot = bot.structure();
-        let (lower, upper) = util::multiset_symmetric_difference_by::<_, _, E::Group, _>(
+        let (lower, upper) = util::multiset_symmetric_difference_by::<_, _, _, E::Group>(
             top.bot,
             bot.top.into_iter().collect(),
             eq,
@@ -2611,7 +2611,87 @@ pub mod stored {
 
 /// Utilities
 pub mod util {
-    use {alloc::vec::Vec, bitvec::vec::BitVec, core::iter::FromIterator};
+    use {
+        alloc::vec::Vec,
+        bitvec::vec::BitVec,
+        core::iter::{from_fn, FromIterator},
+    };
+
+    /// Builds a zeroed [`BitVec`] of the specified length.
+    #[inline]
+    pub fn zeroed_bit_vector(length: usize) -> BitVec {
+        let mut matches: BitVec = BitVec::with_capacity(length);
+        matches.resize(length, false);
+        matches
+    }
+
+    /// Finds first match which is not already annotated in the [`BitVec`].
+    #[inline]
+    pub fn find_first_new_match_by<T, I, F>(
+        needle: &T,
+        haystack: I,
+        matches: &BitVec,
+        mut eq: F,
+    ) -> Option<usize>
+    where
+        I: Iterator,
+        F: FnMut(&T, I::Item) -> bool,
+    {
+        haystack
+            .enumerate()
+            .position(move |(i, elem)| eq(&needle, elem) && !matches[i])
+    }
+
+    /// Looks for the first new match of the `needle` in the `haystack` and updates the `matches`.
+    #[inline]
+    pub fn symmetric_difference_match_predicate<T, H, F>(
+        needle: &T,
+        haystack: &[H],
+        matches: &mut BitVec,
+        eq: F,
+    ) -> bool
+    where
+        F: FnMut(&T, &H) -> bool,
+    {
+        match find_first_new_match_by(needle, haystack.iter(), matches, eq) {
+            Some(index) => {
+                matches.set(index, true);
+                false
+            }
+            _ => true,
+        }
+    }
+
+    /// Skips over elements of the [`Iterator`] if their index is present in the [`BitVec`].
+    #[inline]
+    pub fn skip_matches<I>(iter: I, matches: BitVec) -> impl Iterator<Item = I::Item>
+    where
+        I: IntoIterator,
+    {
+        iter.into_iter()
+            .enumerate()
+            .filter_map(move |(i, elem)| Some(elem).filter(|_| !matches[i]))
+    }
+
+    /// Computes the symmetric difference of two multisets.
+    pub fn multiset_symmetric_difference_by<L, RItem, F, OL>(
+        left: L,
+        right: Vec<RItem>,
+        mut eq: F,
+    ) -> (OL, impl Iterator<Item = RItem>)
+    where
+        L: IntoIterator,
+        OL: FromIterator<L::Item>,
+        F: FnMut(&L::Item, &RItem) -> bool,
+    {
+        let mut matches = zeroed_bit_vector(right.len());
+        (
+            left.into_iter()
+                .filter(|l| symmetric_difference_match_predicate(l, &right, &mut matches, &mut eq))
+                .collect(),
+            skip_matches(right, matches),
+        )
+    }
 
     /// Computes the symmetric difference of two multisets.
     #[inline]
@@ -2627,37 +2707,69 @@ pub mod util {
         multiset_symmetric_difference_by(left, right, PartialEq::eq)
     }
 
-    /// Computes the symmetric difference of two multisets.
-    pub fn multiset_symmetric_difference_by<L, RItem, OL, F>(
-        left: L,
-        right: Vec<RItem>,
-        mut eq: F,
-    ) -> (OL, impl Iterator<Item = RItem>)
-    where
-        L: IntoIterator,
-        OL: FromIterator<L::Item>,
-        F: FnMut(&L::Item, &RItem) -> bool,
-    {
-        let right_len = right.len();
-        let mut matched_indices: BitVec = BitVec::with_capacity(right_len);
-        matched_indices.resize(right_len, false);
-        (
-            left.into_iter()
-                .filter(|l| {
-                    (&right).iter().enumerate().all(|(i, r)| {
-                        if eq(l, r) && !matched_indices[i] {
-                            matched_indices.set(i, true);
-                            return false;
+    #[cfg(feature = "parallel")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "parallel")))]
+    pub mod parallel {
+        use {super::*, parking_lot::RwLock, rayon::prelude::*};
+
+        /// Finds first match which is not already annotated in the [`BitVec`].
+        #[inline]
+        pub fn find_first_new_match_by<T, I, F>(
+            needle: &T,
+            haystack: I,
+            matches: &RwLock<BitVec>,
+            eq: &F,
+        ) -> Option<usize>
+        where
+            T: Sync,
+            I: IndexedParallelIterator,
+            F: Send + Sync + Fn(&T, I::Item) -> bool,
+        {
+            haystack
+                .enumerate()
+                .position_first(move |(i, elem)| eq(&needle, elem) && !matches.read()[i])
+        }
+
+        /// Skips over elements of the [`ParallelIterator`] if their index is present in the [`BitVec`].
+        #[inline]
+        pub fn skip_matches<I>(iter: I, matches: BitVec) -> impl ParallelIterator<Item = I::Item>
+        where
+            I: IntoParallelIterator,
+            I::Iter: IndexedParallelIterator,
+        {
+            iter.into_par_iter()
+                .enumerate()
+                .filter_map(move |(i, elem)| Some(elem).filter(|_| !matches[i]))
+        }
+
+        /// Computes the symmetric difference of two multisets.
+        pub fn multiset_symmetric_difference_by<L, RItem, F, OL>(
+            left: L,
+            right: Vec<RItem>,
+            eq: F,
+        ) -> (OL, impl ParallelIterator<Item = RItem>)
+        where
+            L: ParallelIterator,
+            L::Item: Sync,
+            RItem: Send + Sync,
+            OL: FromParallelIterator<L::Item>,
+            F: Send + Sync + Fn(&L::Item, &RItem) -> bool,
+        {
+            let matches = RwLock::new(zeroed_bit_vector(right.len()));
+            (
+                left.filter(|l| {
+                    match find_first_new_match_by(l, right.par_iter(), &matches, &eq) {
+                        Some(index) => {
+                            matches.write().set(index, true);
+                            false
                         }
-                        true
-                    })
+                        _ => true,
+                    }
                 })
                 .collect(),
-            right
-                .into_iter()
-                .zip(matched_indices)
-                .filter_map(move |(r, m)| Some(r).filter(move |_| !m)),
-        )
+                skip_matches(right, matches.into_inner()),
+            )
+        }
     }
 
     /// Checks if the two multisets share any elements.
@@ -2693,7 +2805,7 @@ pub mod util {
         I: IntoIterator<Item = T>,
     {
         let mut iter = iter.into_iter();
-        core::iter::from_fn(move || match iter.next() {
+        from_fn(move || match iter.next() {
             Some(fst) => match iter.next() {
                 Some(snd) => Some(Some((fst, snd))),
                 _ => Some(None),
