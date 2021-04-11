@@ -214,7 +214,7 @@ pub mod aep {
             if self.expr.is_atom() {
                 self.expr = E::from_atom(mem::replace(
                     &mut self.atom,
-                    mem::replace(&mut self.expr, E::default()).unwrap_atom(),
+                    mem::replace(&mut self.expr, E::empty()).unwrap_atom(),
                 ));
                 true
             } else {
@@ -653,11 +653,12 @@ pub mod rule {
             E: Expression + Send + Sync,
             E::Atom: PartialEq,
             E::Group: Container<E> + FromParallelIterator<E> + IntoParallelIterator<Item = E>,
+            for<'g> GroupRef<'g, E>: exprz::IndexedParallelGroupReference<E>,
             T: Rule<E>,
             B: Rule<E>,
             Output: Rule<E>,
         {
-            pair_compose_by(top, bot, E::eq)
+            pair_compose_by(top, bot, E::parallel_eq)
         }
 
         /// Fold an iterator of rules using [`pair_compose_by`].
@@ -666,6 +667,7 @@ pub mod rule {
         where
             E: Expression + Send + Sync,
             E::Group: Container<E> + FromParallelIterator<E> + IntoParallelIterator<Item = E>,
+            for<'g> GroupRef<'g, E>: exprz::IndexedParallelGroupReference<E>,
             R: Rule<E> + Send + Sync,
             I: IntoParallelIterator<Item = R>,
             F: Send + Sync + Fn(&E, &E) -> bool,
@@ -682,10 +684,11 @@ pub mod rule {
             E: Expression + Send + Sync,
             E::Atom: PartialEq,
             E::Group: Container<E> + FromParallelIterator<E> + IntoParallelIterator<Item = E>,
+            for<'g> GroupRef<'g, E>: exprz::IndexedParallelGroupReference<E>,
             R: Rule<E> + Send + Sync,
             I: IntoParallelIterator<Item = R>,
         {
-            compose_by(rules, E::eq)
+            compose_by(rules, E::parallel_eq)
         }
     }
 
@@ -1531,7 +1534,7 @@ pub mod substitution {
             if self.expr.is_atom() {
                 self.expr = E::from_atom(mem::replace(
                     &mut self.var,
-                    mem::replace(&mut self.expr, E::default()).unwrap_atom(),
+                    mem::replace(&mut self.expr, E::empty()).unwrap_atom(),
                 ));
                 true
             } else {

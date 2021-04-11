@@ -26,7 +26,11 @@ default = []
 aep = []
 
 # Parallel Tools
-parallel = ["rayon", "parking_lot"]
+parallel = [
+    "exprz/rayon",
+    "parking_lot",
+    "rayon",
+]
 
 # Enables all stable features
 stable = [
