@@ -4,10 +4,9 @@
 
 #![cfg_attr(docsrs, feature(doc_cfg), deny(broken_intra_doc_links))]
 #![feature(generic_associated_types)]
-#![feature(exhaustive_patterns)]
 #![allow(incomplete_features)]
 #![forbid(unsafe_code)]
-// #![no_std]
+#![no_std]
 
 // FIXME: reimplement all of the incorrect `derive` traits
 // TODO: implement `Deref/Borrow/ToOwned` traits where possible
@@ -59,7 +58,7 @@ where
     /// Extracts the structure value from `self`.
     fn structure(self) -> S;
 
-    /// Converts `self` into an instance of `E: Expression`.
+    /// Converts `self` into an instance of [`Expression`].
     #[inline]
     fn into(self) -> E
     where
@@ -68,7 +67,7 @@ where
         E::from_expr(self.structure().into())
     }
 
-    /// Tries to build `Self` from an instance of `E: Expression`.
+    /// Tries to build `Self` from an instance of [`Expression`].
     #[inline]
     fn try_from(expr: E) -> Result<Self, S::Error>
     where
@@ -96,7 +95,7 @@ where
 
 /// Atom-Expr Pairs
 ///
-/// A base structure for `Substitution`s and `Composition`s.
+/// A base structure for [`Substitutions`](Substitution) and `Composition`s.
 #[cfg(feature = "aep")]
 #[cfg_attr(docsrs, doc(cfg(feature = "aep")))]
 pub mod aep {
@@ -111,10 +110,10 @@ pub mod aep {
     where
         E: Expression,
     {
-        /// Atom
+        /// [`Atom`](Expression::Atom) Element
         pub atom: &'e E::Atom,
 
-        /// Expression
+        /// [`Expression`] Element
         pub expr: &'e E,
     }
 
@@ -128,7 +127,7 @@ pub mod aep {
             Self { atom, expr }
         }
 
-        /// Returns an owned `Term`.
+        /// Returns an owned [`Term`].
         #[inline]
         pub fn to_owned(&self) -> Term<E>
         where
@@ -173,10 +172,10 @@ pub mod aep {
     where
         E: Expression,
     {
-        /// Atom
+        /// [`Atom`](Expression::Atom) Element
         pub atom: E::Atom,
 
-        /// Expression
+        /// [`Expression`] Element
         pub expr: E,
     }
 
@@ -190,7 +189,7 @@ pub mod aep {
             Self { atom, expr }
         }
 
-        /// Returns the `&Term` as a `TermRef`.
+        /// Returns the [`&Term`](Term) as a [`TermRef`].
         #[inline]
         pub fn as_ref(&self) -> TermRef<'_, E> {
             TermRef::new(&self.atom, &self.expr)
@@ -206,7 +205,8 @@ pub mod aep {
         ///
         /// # Panics
         ///
-        /// This function could panic if the `is_atom`/`unwrap_atom` contract is faulty.
+        /// This function could panic if the
+        /// [`is_atom`](Expression::is_atom)/[`unwrap_atom`](Expression::unwrap_atom) contract is faulty.
         pub fn flip_in_place(&mut self) -> bool
         where
             E::Group: FromIterator<E>,
@@ -307,7 +307,7 @@ pub mod aep {
         E: Expression,
         V: Container<Term<E>>,
     {
-        /// Builds a new `Structure` from a `Term` container.
+        /// Builds a new [`Structure`] from a [`Term`] container.
         #[inline]
         pub fn new(terms: V) -> Self {
             Self {
@@ -377,10 +377,10 @@ pub mod aep {
         VA: Container<E::Atom>,
         VE: Container<E>,
     {
-        /// AEP atoms
+        /// AEP [`Atoms`](Expression::Atom)
         pub atoms: VA,
 
-        /// AEP expressions
+        /// AEP [`Expressions`](Expression)
         pub exprs: VE,
 
         /// Phantom Marker
@@ -393,7 +393,7 @@ pub mod aep {
         VA: Container<E::Atom>,
         VE: Container<E>,
     {
-        /// Builds a new `Structure` from a `Term` container.
+        /// Builds a new [`FlatStructure`] from a [`Term`] container.
         #[inline]
         pub fn new(atoms: VA, exprs: VE) -> Self {
             Self {
@@ -548,24 +548,10 @@ pub mod rule {
     use super::*;
 
     /// Composes two rules using the ratio monoid multiplication algorithm.
-    #[inline]
-    pub fn pair_compose<E, T, B, Output>(top: T, bot: B) -> Output
-    where
-        E: Expression,
-        E::Atom: PartialEq,
-        E::Group: FromIterator<E> + IntoIterator<Item = E>,
-        T: Rule<E>,
-        B: Rule<E>,
-        Output: Rule<E>,
-    {
-        pair_compose_by(top, bot, E::eq)
-    }
-
-    /// Composes two rules using the ratio monoid multiplication algorithm.
     pub fn pair_compose_by<E, T, B, Output, F>(top: T, bot: B, eq: F) -> Output
     where
         E: Expression,
-        E::Group: FromIterator<E> + IntoIterator<Item = E>,
+        E::Group: Container<E>,
         T: Rule<E>,
         B: Rule<E>,
         Output: Rule<E>,
@@ -584,17 +570,18 @@ pub mod rule {
         ))
     }
 
-    /// Fold an iterator of rules using [`pair_compose`].
+    /// Composes two rules using the ratio monoid multiplication algorithm.
     #[inline]
-    pub fn compose<E, R, I>(rules: I) -> R
+    pub fn pair_compose<E, T, B, Output>(top: T, bot: B) -> Output
     where
         E: Expression,
         E::Atom: PartialEq,
-        E::Group: FromIterator<E> + IntoIterator<Item = E>,
-        R: Rule<E>,
-        I: IntoIterator<Item = R>,
+        E::Group: Container<E>,
+        T: Rule<E>,
+        B: Rule<E>,
+        Output: Rule<E>,
     {
-        compose_by(rules, E::eq)
+        pair_compose_by(top, bot, E::eq)
     }
 
     /// Fold an iterator of rules using [`pair_compose_by`].
@@ -602,15 +589,104 @@ pub mod rule {
     pub fn compose_by<E, R, I, F>(rules: I, mut eq: F) -> R
     where
         E: Expression,
-        E::Group: FromIterator<E> + IntoIterator<Item = E>,
+        E::Group: Container<E>,
         R: Rule<E>,
         I: IntoIterator<Item = R>,
         F: FnMut(&E, &E) -> bool,
     {
-        let mut iter = rules.into_iter();
-        iter.next()
-            .map(move |r| iter.fold(r, move |t, b| pair_compose_by(t, b, &mut eq)))
+        rules
+            .into_iter()
+            .reduce(move |t, b| pair_compose_by(t, b, &mut eq))
             .unwrap_or_else(R::empty)
+    }
+
+    /// Fold an iterator of rules using [`pair_compose`].
+    #[inline]
+    pub fn compose<E, R, I>(rules: I) -> R
+    where
+        E: Expression,
+        E::Atom: PartialEq,
+        E::Group: Container<E>,
+        R: Rule<E>,
+        I: IntoIterator<Item = R>,
+    {
+        compose_by(rules, E::eq)
+    }
+
+    /// Parallel [`Rule`] Algorithms
+    #[cfg(feature = "parallel")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "parallel")))]
+    pub mod parallel {
+        use {
+            super::*,
+            rayon::iter::{FromParallelIterator, IntoParallelIterator, ParallelIterator},
+        };
+
+        /// Composes two rules using the ratio monoid multiplication algorithm.
+        pub fn pair_compose_by<E, T, B, Output, F>(top: T, bot: B, eq: F) -> Output
+        where
+            E: Expression + Send + Sync,
+            E::Group: Container<E> + FromParallelIterator<E> + IntoParallelIterator<Item = E>,
+            T: Rule<E>,
+            B: Rule<E>,
+            Output: Rule<E>,
+            F: Send + Sync + Fn(&E, &E) -> bool,
+        {
+            let top = top.structure();
+            let bot = bot.structure();
+            let (lower, upper) = util::parallel::multiset_symmetric_difference_by::<
+                _,
+                _,
+                _,
+                E::Group,
+            >(top.bot, bot.top.into_iter().collect(), eq);
+            Output::from(super::Structure::new(
+                upper.chain(top.top).collect(),
+                lower.into_iter().chain(bot.bot).collect(),
+            ))
+        }
+
+        /// Composes two rules using the ratio monoid multiplication algorithm.
+        #[inline]
+        pub fn pair_compose<E, T, B, Output>(top: T, bot: B) -> Output
+        where
+            E: Expression + Send + Sync,
+            E::Atom: PartialEq,
+            E::Group: Container<E> + FromParallelIterator<E> + IntoParallelIterator<Item = E>,
+            T: Rule<E>,
+            B: Rule<E>,
+            Output: Rule<E>,
+        {
+            pair_compose_by(top, bot, E::eq)
+        }
+
+        /// Fold an iterator of rules using [`pair_compose_by`].
+        #[inline]
+        pub fn compose_by<E, R, I, F>(rules: I, eq: F) -> R
+        where
+            E: Expression + Send + Sync,
+            E::Group: Container<E> + FromParallelIterator<E> + IntoParallelIterator<Item = E>,
+            R: Rule<E> + Send + Sync,
+            I: IntoParallelIterator<Item = R>,
+            F: Send + Sync + Fn(&E, &E) -> bool,
+        {
+            rules
+                .into_par_iter()
+                .reduce(R::empty, move |t, b| pair_compose_by(t, b, &eq))
+        }
+
+        /// Fold an iterator of rules using [`pair_compose`].
+        #[inline]
+        pub fn compose<E, R, I>(rules: I) -> R
+        where
+            E: Expression + Send + Sync,
+            E::Atom: PartialEq,
+            E::Group: Container<E> + FromParallelIterator<E> + IntoParallelIterator<Item = E>,
+            R: Rule<E> + Send + Sync,
+            I: IntoParallelIterator<Item = R>,
+        {
+            compose_by(rules, E::eq)
+        }
     }
 
     /// Returns `true` if the two ratios are equal pointwise.
@@ -663,7 +739,7 @@ pub mod rule {
             self.cases().eq(&other.cases())
         }
 
-        /// Clones a rule.
+        /// Clones a [`Rule`].
         #[inline]
         fn clone(&self) -> Self
         where
@@ -673,7 +749,7 @@ pub mod rule {
             Self::from(Clone::clone(&Structure::from(self.cases())))
         }
 
-        /// Builds a new `Rule` from two groups.
+        /// Builds a new [`Rule`] from two groups.
         #[inline]
         fn new(top: E::Group, bot: E::Group) -> Self
         where
@@ -682,7 +758,7 @@ pub mod rule {
             Self::from(Structure::new(top, bot))
         }
 
-        /// Builds an empty `Rule`.
+        /// Builds an empty [`Rule`].
         #[inline]
         fn empty() -> Self
         where
@@ -735,7 +811,7 @@ pub mod rule {
         }
     }
 
-    /// Rule Reference Structure Type
+    /// [`Rule`] Reference Structure Type
     pub struct Reference<'e, E>
     where
         E: 'e + Expression,
@@ -751,7 +827,7 @@ pub mod rule {
     where
         E: Expression,
     {
-        /// Builds a new `Reference` from references to the top and bottom of a rule.
+        /// Builds a new [`Reference`] from references to the top and bottom of a rule.
         #[inline]
         pub fn new(top: GroupRef<'e, E>, bot: GroupRef<'e, E>) -> Self {
             Self { top, bot }
@@ -816,12 +892,12 @@ pub mod rule {
         }
     }
 
-    /// Based Rule Reference Structure Type
+    /// Based [`Rule`] Reference Structure Type
     pub struct BasedReference<'e, E>
     where
         E: 'e + Expression,
     {
-        /// Base Group Reference
+        /// Base [`Group`](Expression::Group) Reference
         pub base: GroupRef<'e, E>,
     }
 
@@ -829,13 +905,13 @@ pub mod rule {
     where
         E: Expression,
     {
-        /// Builds a new `BasedReference` from a `base` group reference.
+        /// Builds a new [`BasedReference`] from a base group reference.
         ///
         /// # Safety
         ///
-        /// This function does not perform any checks to ensure that the `base` group reference
-        /// points to a valid `Rule` structure. The `BasedReference::top` and `BasedReference::bot`
-        /// methods will panic if the `base` reference is not valid.
+        /// This function does not perform any checks to ensure that the [`base`](Self::base)
+        /// group reference points to a valid [`Rule`] structure. The [`top`](Self::top) and
+        /// [`bot`](Self::bot) methods will panic if the [`base`](Self::base) reference is not valid.
         #[inline]
         pub fn new(base: GroupRef<'e, E>) -> Self {
             Self { base }
@@ -845,7 +921,7 @@ pub mod rule {
         ///
         /// # Panics
         ///
-        /// This function panics if the `self.base` reference does not point to a valid rule object.
+        /// This function panics if the [`base`](Self::base) reference does not point to a valid rule object.
         #[inline]
         pub fn top(&self) -> GroupRef<E> {
             self.ref_pair().0
@@ -855,7 +931,7 @@ pub mod rule {
         ///
         /// # Panics
         ///
-        /// This function panics if the `self.base` reference does not point to a valid rule object.
+        /// This function panics if the [`base`](Self::base) reference does not point to a valid rule object.
         #[inline]
         pub fn bot(&self) -> GroupRef<E> {
             self.ref_pair().1
@@ -865,7 +941,7 @@ pub mod rule {
         ///
         /// # Panics
         ///
-        /// This function panics if the `self.base` reference does not point to a valid rule object.
+        /// This function panics if the [`base`](Self::base) reference does not point to a valid rule object.
         #[inline]
         pub fn ref_pair(&self) -> RefPair<E> {
             // FIXME: use `unwrap_unchecked` when it comes out
@@ -926,7 +1002,7 @@ pub mod rule {
         }
     }
 
-    /// Rule Structure Type
+    /// [`Rule`] Structure Type
     #[derive(Debug)]
     pub struct Structure<E>
     where
@@ -943,19 +1019,19 @@ pub mod rule {
     where
         E: Expression,
     {
-        /// Builds a new `Structure` from a pair of groups.
+        /// Builds a new [`Structure`] from a pair of groups.
         #[inline]
         pub fn new(top: E::Group, bot: E::Group) -> Self {
             Self { top, bot }
         }
 
-        /// Returns the `Structure` as a `Pair`.
+        /// Returns the [`Structure`] as a [`Pair`].
         #[inline]
         pub fn pair(self) -> Pair<E> {
             (self.top, self.bot)
         }
 
-        /// Returns the `Structure` as a pair of references.
+        /// Returns the [`Structure`] as a pair of references.
         #[inline]
         pub fn pair_by_ref(&self) -> (&E::Group, &E::Group) {
             (&self.top, &self.bot)
@@ -1053,7 +1129,7 @@ pub mod rule {
         }
     }
 
-    /// Rule Shape Error Type
+    /// [`Rule`] Shape Error Type
     #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
     pub enum ShapeError {
         /// The expression is not a group.
@@ -1072,7 +1148,7 @@ pub mod rule {
         MissingTopBotGroups,
     }
 
-    /// Checks if an atom matches the `Rule` pattern.
+    /// Checks if an atom matches the [`Rule`] pattern.
     #[inline]
     pub fn matches_atom<E>(atom: &E::Atom) -> Result<(), ShapeError>
     where
@@ -1082,7 +1158,7 @@ pub mod rule {
         Err(ShapeError::NotGroup)
     }
 
-    /// Checks if a group matches the `Rule` pattern.
+    /// Checks if a group matches the [`Rule`] pattern.
     #[inline]
     pub fn matches_group<E>(group: &GroupRef<E>) -> Result<(), ShapeError>
     where
@@ -1104,7 +1180,7 @@ pub mod rule {
         }
     }
 
-    /// Checks if an expression matches the `Rule` pattern.
+    /// Checks if an expression matches the [`Rule`] pattern.
     #[inline]
     pub fn matches<E>(expr: &ExprRef<E>) -> Result<(), ShapeError>
     where
@@ -1177,10 +1253,10 @@ pub mod rule {
         }
     }
 
-    /// Rule Reference Pair Type
+    /// [`Rule`] Reference Pair Type
     pub type RefPair<'e, E> = (GroupRef<'e, E>, GroupRef<'e, E>);
 
-    /// Rule Pair Type
+    /// [`Rule`] Pair Type
     pub type Pair<E> = (<E as Expression>::Group, <E as Expression>::Group);
 }
 
@@ -1277,7 +1353,7 @@ pub mod substitution {
     where
         E: 's + Expression,
         E::Atom: PartialEq,
-        E::Group: FromIterator<E> + IntoIterator<Item = E>,
+        E::Group: Container<E>,
         I: IntoIterator<Item = (&'s E::Atom, E)>,
     {
         expr.substitute(from_iter_on_atoms_fn(iter))
@@ -1301,7 +1377,7 @@ pub mod substitution {
     where
         E: 's + Expression,
         E::Atom: PartialEq,
-        E::Group: FromIterator<E> + IntoIterator<Item = E>,
+        E::Group: Container<E>,
         I: IntoIterator<Item = (&'s E::Atom, E)>,
     {
         move |expr| from_iter(iter, expr)
@@ -1663,7 +1739,7 @@ pub mod substitution {
         fn apply(&self, expr: E) -> E
         where
             E::Atom: Clone + PartialEq,
-            E::Group: IntoIterator<Item = E> + FromIterator<E>,
+            E::Group: Container<E>,
         {
             expr.substitute(move |atom| self.apply_atom(atom))
         }
@@ -1673,7 +1749,7 @@ pub mod substitution {
         fn apply_ref(&self, expr: &E) -> E
         where
             E::Atom: Clone + PartialEq,
-            E::Group: IntoIterator<Item = E> + FromIterator<E>,
+            E::Group: Container<E>,
         {
             expr.substitute_ref(move |atom| self.apply_atom_ref(atom))
         }
@@ -2644,7 +2720,7 @@ pub mod util {
 
     /// Looks for the first new match of the `needle` in the `haystack` and updates the `matches`.
     #[inline]
-    pub fn symmetric_difference_match_predicate<T, H, F>(
+    pub fn set_first_new_match_by<T, H, F>(
         needle: &T,
         haystack: &[H],
         matches: &mut BitVec,
@@ -2687,7 +2763,7 @@ pub mod util {
         let mut matches = zeroed_bit_vector(right.len());
         (
             left.into_iter()
-                .filter(|l| symmetric_difference_match_predicate(l, &right, &mut matches, &mut eq))
+                .filter(|l| set_first_new_match_by(l, &right, &mut matches, &mut eq))
                 .collect(),
             skip_matches(right, matches),
         )
@@ -2707,18 +2783,29 @@ pub mod util {
         multiset_symmetric_difference_by(left, right, PartialEq::eq)
     }
 
+    /// Parallel Computation Utilities
     #[cfg(feature = "parallel")]
     #[cfg_attr(docsrs, doc(cfg(feature = "parallel")))]
     pub mod parallel {
-        use {super::*, parking_lot::RwLock, rayon::prelude::*};
+        use {
+            super::*,
+            parking_lot::RwLock,
+            rayon::iter::{
+                FromParallelIterator, IndexedParallelIterator, IntoParallelIterator,
+                IntoParallelRefIterator, ParallelIterator,
+            },
+        };
+
+        /// Locked [`BitVec`] Type
+        pub type LockedBitVec = RwLock<BitVec>;
 
         /// Finds first match which is not already annotated in the [`BitVec`].
         #[inline]
         pub fn find_first_new_match_by<T, I, F>(
             needle: &T,
             haystack: I,
-            matches: &RwLock<BitVec>,
-            eq: &F,
+            matches: &LockedBitVec,
+            eq: F,
         ) -> Option<usize>
         where
             T: Sync,
@@ -2728,6 +2815,28 @@ pub mod util {
             haystack
                 .enumerate()
                 .position_first(move |(i, elem)| eq(&needle, elem) && !matches.read()[i])
+        }
+
+        /// Looks for the first new match of the `needle` in the `haystack` and updates the `matches`.
+        #[inline]
+        pub fn set_first_new_match_by<T, H, F>(
+            needle: &T,
+            haystack: &[H],
+            matches: &LockedBitVec,
+            eq: F,
+        ) -> bool
+        where
+            T: Sync,
+            H: Sync,
+            F: Send + Sync + Fn(&T, &H) -> bool,
+        {
+            match find_first_new_match_by(needle, haystack.par_iter(), matches, eq) {
+                Some(index) => {
+                    matches.write().set(index, true);
+                    false
+                }
+                _ => true,
+            }
         }
 
         /// Skips over elements of the [`ParallelIterator`] if their index is present in the [`BitVec`].
@@ -2749,7 +2858,7 @@ pub mod util {
             eq: F,
         ) -> (OL, impl ParallelIterator<Item = RItem>)
         where
-            L: ParallelIterator,
+            L: IntoParallelIterator,
             L::Item: Sync,
             RItem: Send + Sync,
             OL: FromParallelIterator<L::Item>,
@@ -2757,18 +2866,26 @@ pub mod util {
         {
             let matches = RwLock::new(zeroed_bit_vector(right.len()));
             (
-                left.filter(|l| {
-                    match find_first_new_match_by(l, right.par_iter(), &matches, &eq) {
-                        Some(index) => {
-                            matches.write().set(index, true);
-                            false
-                        }
-                        _ => true,
-                    }
-                })
-                .collect(),
+                left.into_par_iter()
+                    .filter(|l| set_first_new_match_by(l, &right, &matches, &eq))
+                    .collect(),
                 skip_matches(right, matches.into_inner()),
             )
+        }
+
+        /// Computes the symmetric difference of two multisets.
+        #[inline]
+        pub fn multiset_symmetric_difference<L, RItem, OL>(
+            left: L,
+            right: Vec<RItem>,
+        ) -> (OL, impl ParallelIterator<Item = RItem>)
+        where
+            L: IntoParallelIterator,
+            L::Item: Sync + PartialEq<RItem>,
+            RItem: Send + Sync,
+            OL: FromParallelIterator<L::Item>,
+        {
+            multiset_symmetric_difference_by(left, right, PartialEq::eq)
         }
     }
 
