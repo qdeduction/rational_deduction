@@ -2303,6 +2303,55 @@ pub mod substitution {
         }
     }
 
+    /// Tries to generate a substitution from two atomic expressions.
+    #[inline]
+    pub fn generate_from_atoms<E, S, F>(
+        lhs: &E::Atom,
+        rhs: &E::Atom,
+        mut can_substitute: F,
+    ) -> Option<Directed<S>>
+    where
+        E: Expression,
+        E::Atom: Clone + PartialEq,
+        E::Group: FromIterator<E>,
+        S: FromIterator<Term<E>> + IntoIterator<Item = Term<E>>,
+        F: FnMut(&E::Atom) -> bool,
+    {
+        generate_from_atoms_inner(lhs, rhs, &mut can_substitute)
+    }
+
+    /// Tries to generate a substitution from two grouped expressions.
+    // FIXME: find a way to accept `&E::Group` or `GroupRef<E>`
+    #[inline]
+    pub fn generate_from_groups<E, S, F>(
+        lhs: &GroupRef<E>,
+        rhs: &GroupRef<E>,
+        mut can_substitute: F,
+    ) -> Option<Directed<S>>
+    where
+        E: Expression,
+        E::Atom: Clone + PartialEq,
+        E::Group: FromIterator<E>,
+        S: FromIterator<Term<E>> + IntoIterator<Item = Term<E>>,
+        F: FnMut(&E::Atom) -> bool,
+    {
+        generate_from_groups_inner(lhs, rhs, &mut can_substitute)
+    }
+
+    /// Tries to generate a substitution from two expressions.
+    // FIXME: find a way to accept `&E` or `ExprRef<E>`
+    #[inline]
+    pub fn generate<E, S, F>(lhs: &E, rhs: &E, mut can_substitute: F) -> Option<Directed<S>>
+    where
+        E: Expression,
+        E::Atom: Clone + PartialEq,
+        E::Group: FromIterator<E>,
+        S: FromIterator<Term<E>> + IntoIterator<Item = Term<E>>,
+        F: FnMut(&E::Atom) -> bool,
+    {
+        generate_inner(lhs.cases(), rhs.cases(), &mut can_substitute)
+    }
+
     fn generate_from_atoms_inner<E, S, F>(
         lhs: &E::Atom,
         rhs: &E::Atom,
@@ -2420,53 +2469,125 @@ pub mod substitution {
         }
     }
 
-    /// Tries to generate a substitution from two atomic expressions.
+    /// Generalizes a set of expressions to a single expression and substitutions.
     #[inline]
-    pub fn generate_from_atoms<E, S, F>(
-        lhs: &E::Atom,
-        rhs: &E::Atom,
+    pub fn generalize<E, F, G, S, C>(
+        exprs: &[E],
         mut can_substitute: F,
-    ) -> Option<Directed<S>>
+        mut atom_generator: G,
+    ) -> (E, C)
     where
         E: Expression,
         E::Atom: Clone + PartialEq,
-        E::Group: FromIterator<E>,
-        S: FromIterator<Term<E>> + IntoIterator<Item = Term<E>>,
+        E::Group: FromIterator<E> + IntoIterator<Item = E>,
         F: FnMut(&E::Atom) -> bool,
+        G: FnMut() -> E::Atom,
+        S: Substitution<E>,
+        C: FromIterator<S>,
     {
-        generate_from_atoms_inner(lhs, rhs, &mut can_substitute)
+        generalize_inner(exprs, &mut can_substitute, &mut atom_generator)
     }
 
-    /// Tries to generate a substitution from two grouped expressions.
-    // FIXME: find a way to accept `&E::Group` or `GroupRef<E>`
     #[inline]
-    pub fn generate_from_groups<E, S, F>(
-        lhs: &GroupRef<E>,
-        rhs: &GroupRef<E>,
-        mut can_substitute: F,
-    ) -> Option<Directed<S>>
+    fn generalize_to_atom<E, S, C>(target: &E::Atom, exprs: &[E]) -> C
     where
         E: Expression,
         E::Atom: Clone + PartialEq,
-        E::Group: FromIterator<E>,
-        S: FromIterator<Term<E>> + IntoIterator<Item = Term<E>>,
-        F: FnMut(&E::Atom) -> bool,
+        E::Group: FromIterator<E> + IntoIterator<Item = E>,
+        S: Substitution<E>,
+        C: FromIterator<S>,
     {
-        generate_from_groups_inner(lhs, rhs, &mut can_substitute)
+        exprs
+            .iter()
+            .map(move |expr| match expr.atom_ref() {
+                Some(atom) if target == atom => S::empty(),
+                _ => S::unit(target.clone(), (*expr).to_owned()),
+            })
+            .collect()
     }
 
-    /// Tries to generate a substitution from two expressions.
-    // FIXME: find a way to accept `&E` or `ExprRef<E>`
-    #[inline]
-    pub fn generate<E, S, F>(lhs: &E, rhs: &E, mut can_substitute: F) -> Option<Directed<S>>
+    fn transpose_substitutions<E, S>(
+        expr_count: usize,
+        mut substitutions: Vec<Vec<S>>,
+    ) -> impl Iterator<Item = S>
+    where
+        E: Expression,
+        E::Atom: PartialEq,
+        E::Group: FromIterator<E> + IntoIterator<Item = E>,
+        S: Substitution<E>,
+    {
+        let mut result = Vec::with_capacity(expr_count);
+        for _ in 0..expr_count {
+            result.push(S::from(
+                substitutions
+                    .iter_mut()
+                    .map(move |s| {
+                        let mut s = s.pop().unwrap().structure();
+                        s.dedup();
+                        s.into_iter()
+                    })
+                    .flatten()
+                    .collect(),
+            ));
+        }
+        result.into_iter().rev()
+    }
+
+    fn generalize_inner<E, F, G, S, C>(
+        exprs: &[E],
+        can_substitute: &mut F,
+        atom_generator: &mut G,
+    ) -> (E, C)
     where
         E: Expression,
         E::Atom: Clone + PartialEq,
-        E::Group: FromIterator<E>,
-        S: FromIterator<Term<E>> + IntoIterator<Item = Term<E>>,
+        E::Group: FromIterator<E> + IntoIterator<Item = E>,
         F: FnMut(&E::Atom) -> bool,
+        G: FnMut() -> E::Atom,
+        S: Substitution<E>,
+        C: FromIterator<S>,
     {
-        generate_inner(lhs.cases(), rhs.cases(), &mut can_substitute)
+        match exprs.len() {
+            0 => (E::empty(), C::from_iter(None)),
+            1 => (exprs[0].to_owned(), C::from_iter(Some(S::empty()))),
+            expr_count => {
+                match exprs.iter().find_map(move |e| e.atom()) {
+                    Some(atom) if can_substitute(atom) => {
+                        return (E::from_atom(atom.clone()), generalize_to_atom(atom, exprs));
+                    }
+                    None => {
+                        if let Some(group_size) = (&exprs[0]).unwrap_group().len() {
+                            let groups = exprs.iter().map(move |e| e.unwrap_group());
+                            if groups.clone().all(move |g| g.len() == Some(group_size)) {
+                                let (expr_base, inner_substitutions) = (0..group_size)
+                                    .into_iter()
+                                    .map(move |i| {
+                                        // FIXME: remove the call to `.to_owned` if possible
+                                        generalize_inner::<_, _, _, _, Vec<S>>(
+                                            &groups
+                                                .clone()
+                                                .map(move |g| g.get(i).unwrap().to_owned())
+                                                .collect::<Vec<_>>(),
+                                            can_substitute,
+                                            atom_generator,
+                                        )
+                                    })
+                                    .unzip::<_, _, Vec<_>, Vec<_>>();
+                                return (
+                                    E::from_group(expr_base.into_iter().collect()),
+                                    transpose_substitutions(expr_count, inner_substitutions)
+                                        .collect(),
+                                );
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                let target = atom_generator();
+                let substitutions = generalize_to_atom(&target, exprs);
+                (E::from_atom(target), substitutions)
+            }
+        }
     }
 }
 
