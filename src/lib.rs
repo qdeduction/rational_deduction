@@ -2,14 +2,16 @@
 //!
 //! _Rust implementation of the rational deduction algorithms_.
 
-#![cfg_attr(docsrs, feature(doc_cfg), deny(broken_intra_doc_links))]
+// FIXME: reimplement all of the incorrect `derive` traits
+// TODO:  implement `Deref/Borrow/ToOwned` traits where possible
+
+#![cfg_attr(docsrs, feature(doc_cfg), forbid(broken_intra_doc_links))]
+#![feature(exhaustive_patterns)]
 #![feature(generic_associated_types)]
 #![allow(incomplete_features)]
+#![forbid(missing_docs)]
 #![forbid(unsafe_code)]
 #![no_std]
-
-// FIXME: reimplement all of the incorrect `derive` traits
-// TODO: implement `Deref/Borrow/ToOwned` traits where possible
 
 extern crate alloc;
 
@@ -45,6 +47,11 @@ pub use prelude::*;
 pub trait Container<T>: FromIterator<T> + IntoIterator<Item = T> {}
 
 impl<T, C> Container<T> for C where C: FromIterator<T> + IntoIterator<Item = T> {}
+
+/// Opaque Container Helper Trait
+pub trait OpaqueContainer: FromIterator<Self::Item> + IntoIterator {}
+
+impl<C> OpaqueContainer for C where C: FromIterator<C::Item> + IntoIterator {}
 
 /// Structure Trait
 pub trait Structure<E, S>
@@ -299,7 +306,7 @@ pub mod aep {
         pub terms: V,
 
         /// Phantom Marker
-        _marker: PhantomData<E>,
+        __: PhantomData<E>,
     }
 
     impl<E, V> Structure<E, V>
@@ -312,7 +319,7 @@ pub mod aep {
         pub fn new(terms: V) -> Self {
             Self {
                 terms,
-                _marker: PhantomData,
+                __: PhantomData,
             }
         }
     }
@@ -384,7 +391,7 @@ pub mod aep {
         pub exprs: VE,
 
         /// Phantom Marker
-        _marker: PhantomData<E>,
+        __: PhantomData<E>,
     }
 
     impl<E, VA, VE> FlatStructure<E, VA, VE>
@@ -393,13 +400,13 @@ pub mod aep {
         VA: Container<E::Atom>,
         VE: Container<E>,
     {
-        /// Builds a new [`FlatStructure`] from a [`Term`] container.
+        /// Builds a new [`FlatStructure`] from an atom container and an expression container.
         #[inline]
         pub fn new(atoms: VA, exprs: VE) -> Self {
             Self {
                 atoms,
                 exprs,
-                _marker: PhantomData,
+                __: PhantomData,
             }
         }
     }
@@ -412,8 +419,7 @@ pub mod aep {
     {
         #[inline]
         fn default() -> Self {
-            // Self::new(V::from_iter(None))
-            todo!()
+            Self::new(VA::from_iter(None), VE::from_iter(None))
         }
     }
 
@@ -445,10 +451,12 @@ pub mod aep {
         where
             I: IntoIterator<Item = Term<E>>,
         {
-            let _ = iter;
-            // let (atoms, exprs) = iter.into_iter().map(move |t| (t.atom, t.expr)).unzip();
-            // Self::new(atoms, exprs)
-            todo!()
+            // FIXME: try to avoid the `Vec` usage if possible
+            let (atoms, exprs) = iter
+                .into_iter()
+                .map(move |t| (t.atom, t.expr))
+                .unzip::<_, _, Vec<_>, Vec<_>>();
+            Self::new(atoms.into_iter().collect(), exprs.into_iter().collect())
         }
     }
 
@@ -793,7 +801,7 @@ pub mod rule {
             E::Atom: Clone + PartialEq,
             S: Substitution<E>,
         {
-            // TODO: what about more general substitution methods
+            // TODO: what about more general substitution methods (see `Expression::substitute`)
             let (top, bot) = self.pair();
             Self::new(substitution.apply_group(top), substitution.apply_group(bot))
         }
@@ -806,7 +814,7 @@ pub mod rule {
             E::Atom: Clone + PartialEq,
             S: Substitution<E>,
         {
-            // TODO: what about more general substitution methods
+            // TODO: what about more general substitution methods (see `Expression::substitute_ref`)
             Self::new(
                 substitution.apply_group_ref(&self.top()),
                 substitution.apply_group_ref(&self.bot()),
@@ -891,7 +899,7 @@ pub mod rule {
     {
         #[inline]
         fn from(structure: &'e Structure<E>) -> Self {
-            Self::new(structure.top.reference(), structure.bot.reference())
+            Self::new(structure.top.as_ref(), structure.bot.as_ref())
         }
     }
 
@@ -915,9 +923,38 @@ pub mod rule {
         /// This function does not perform any checks to ensure that the [`base`](Self::base)
         /// group reference points to a valid [`Rule`] structure. The [`top`](Self::top) and
         /// [`bot`](Self::bot) methods will panic if the [`base`](Self::base) reference is not valid.
+        ///
+        /// Use [`new`](Self::new) to build a [`BasedReference`] with a valid base reference.
         #[inline]
-        pub fn new(base: GroupRef<'e, E>) -> Self {
+        pub fn new_unchecked(base: GroupRef<'e, E>) -> Self {
             Self { base }
+        }
+
+        /// Builds a new [`BasedReference`] from a base group reference.
+        #[inline]
+        pub fn new(base: GroupRef<'e, E>) -> Result<Self, GroupRef<'e, E>> {
+            if Self::is_valid_base_reference(&base) {
+                Ok(Self::new_unchecked(base))
+            } else {
+                Err(base)
+            }
+        }
+
+        /// Returns `true` if [`base`](Self::base) is a valid [`Rule`] reference.
+        #[inline]
+        pub fn is_valid_base_reference(base: &GroupRef<'e, E>) -> bool {
+            let mut iter = base.iter();
+            iter.next()
+                .map(exprz::Reference::is_group)
+                .zip(iter.next().map(exprz::Reference::is_group))
+                .map(move |(t, b)| t && b)
+                .unwrap_or(false)
+        }
+
+        /// Returns `true` if [`self.base`](Self::base) is a valid [`Rule`] reference.
+        #[inline]
+        pub fn is_valid(&self) -> bool {
+            Self::is_valid_base_reference(&self.base)
         }
 
         /// Returns the top element of the rule.
@@ -930,6 +967,14 @@ pub mod rule {
             self.ref_pair().0
         }
 
+        /// Tries to return the top element of the rule. Return `None` if
+        /// [`self.base`](Self::base) is an invalid [`Rule`] reference.
+        #[inline]
+        pub fn try_top(&self) -> Option<GroupRef<E>> {
+            // TODO: return a more informative `Result<_, _>`
+            self.try_ref_pair().map(move |p| p.0)
+        }
+
         /// Returns the bottom element of the rule.
         ///
         /// # Panics
@@ -938,6 +983,14 @@ pub mod rule {
         #[inline]
         pub fn bot(&self) -> GroupRef<E> {
             self.ref_pair().1
+        }
+
+        /// Tries to return the bottom element of the rule. Return `None` if
+        /// [`self.base`](Self::base) is an invalid [`Rule`] reference.
+        #[inline]
+        pub fn try_bot(&self) -> Option<GroupRef<E>> {
+            // TODO: return a more informative `Result<_, _>`
+            self.try_ref_pair().map(move |p| p.1)
         }
 
         /// Returns the top and bottom element of the rule as a pair.
@@ -954,6 +1007,17 @@ pub mod rule {
                 iter.next().unwrap().unwrap_group(),
             )
         }
+
+        /// Tries to return the top and bottom element of the rule as a pair. Returns `None` if
+        /// [`self.base`](Self::base) is an invalid [`Rule`] reference.
+        #[inline]
+        pub fn try_ref_pair(&self) -> Option<RefPair<E>> {
+            // TODO: return a more informative `Result<_, _>`
+            let mut iter = self.base.iter();
+            iter.next()
+                .and_then(exprz::Reference::group)
+                .zip(iter.next().and_then(exprz::Reference::group))
+        }
     }
 
     impl<'e, E> Clone for BasedReference<'e, E>
@@ -963,7 +1027,7 @@ pub mod rule {
     {
         #[inline]
         fn clone(&self) -> Self {
-            Self::new(self.base.clone())
+            Self::new_unchecked(self.base.clone())
         }
     }
 
@@ -1001,7 +1065,7 @@ pub mod rule {
         #[inline]
         fn try_from(expr: ExprRef<'e, E>) -> Result<Self, Self::Error> {
             matches(&expr)?;
-            Ok(Self::new(expr.unwrap_group()))
+            Ok(Self::new_unchecked(expr.unwrap_group()))
         }
     }
 
@@ -1430,7 +1494,7 @@ pub mod substitution {
             self.expr.atom().map_or(false, move |atom| atom == self.var)
         }
 
-        /// Returns an owned `Term`.
+        /// Returns an owned [`Term`].
         #[inline]
         pub fn to_owned(&self) -> Term<E>
         where
@@ -1492,13 +1556,13 @@ pub mod substitution {
             Self { var, expr }
         }
 
-        /// Returns the `&Term` as a `TermRef`.
+        /// Returns the [`&Term`](Term) as a [`TermRef`].
         #[inline]
         pub fn as_ref(&self) -> TermRef<'_, E> {
             TermRef::new(&self.var, &self.expr)
         }
 
-        /// Builds an identity `Term`.
+        /// Builds an identity [`Term`].
         #[inline]
         pub fn identity(atom: E::Atom) -> Self
         where
@@ -1892,7 +1956,7 @@ pub mod substitution {
         pub terms: V,
 
         /// Phantom Marker
-        _marker: PhantomData<E>,
+        __: PhantomData<E>,
     }
 
     impl<E, V> Structure<E, V>
@@ -1900,12 +1964,12 @@ pub mod substitution {
         E: Expression,
         V: Container<Term<E>>,
     {
-        /// Builds a new `Structure` from a `Term` container.
+        /// Builds a new [`Structure`] from a [`Term`] container.
         #[inline]
         pub fn new(terms: V) -> Self {
             Self {
                 terms,
-                _marker: PhantomData,
+                __: PhantomData,
             }
         }
 
@@ -2523,8 +2587,8 @@ pub mod substitution {
                     .iter_mut()
                     .map(move |s| {
                         let mut s = s.pop().unwrap().structure();
-                        s.dedup();
-                        s.into_iter()
+                        s.dedup(); // FIXME: is this correct?
+                        s
                     })
                     .flatten()
                     .collect(),
@@ -2613,25 +2677,28 @@ pub mod stored {
     }
 
     /// Stored Shape Type
-    #[derive(Copy, Debug, Eq, Hash, PartialEq)]
-    pub enum StoredShape<E, S>
+    #[derive(Debug, Eq, Hash, PartialEq)]
+    pub enum StoredShape<E, S, K = <E as Expression>::Atom>
     where
         E: Expression,
         S: Shape<E>,
     {
-        /// Atomic Key
-        Key(E::Atom),
+        /// Key
+        Key(K),
 
         /// Expression Shape
         Shape(S),
+
+        #[doc(hidden)]
+        __(util::Nothing<E>),
     }
 
-    impl<E, S> StoredShape<E, S>
+    impl<E, S, K> StoredShape<E, S, K>
     where
         E: Expression,
         S: Shape<E>,
     {
-        /// Checks if the `StoredShape` is an atomic key.
+        /// Checks if the `StoredShape` is a key.
         #[must_use]
         #[inline]
         pub fn is_key(&self) -> bool {
@@ -2645,27 +2712,27 @@ pub mod stored {
             matches!(self, Self::Shape(_))
         }
 
-        /// Converts from an `StoredShape<E, _>` to an `Option<E::Atom>`.
+        /// Converts from an `StoredShape<E, S, K>` to an `Option<K>`.
         #[must_use]
         #[inline]
-        pub fn key(self) -> Option<E::Atom> {
+        pub fn key(self) -> Option<K> {
             match self {
                 Self::Key(key) => Some(key),
                 _ => None,
             }
         }
 
-        /// Converts from an `&StoredShape<E, _>` to an `Option<&E::Atom>`.
+        /// Converts from an `&StoredShape<E, S, K>` to an `Option<&K>`.
         #[must_use]
         #[inline]
-        pub fn key_ref(&self) -> Option<&E::Atom> {
+        pub fn key_ref(&self) -> Option<&K> {
             match self {
                 Self::Key(key) => Some(key),
                 _ => None,
             }
         }
 
-        /// Converts from a `StoredShape<_, S>` to an `Option<S>`.
+        /// Converts from a `StoredShape<E, S, K>` to an `Option<S>`.
         #[must_use]
         #[inline]
         pub fn shape(self) -> Option<S> {
@@ -2675,7 +2742,7 @@ pub mod stored {
             }
         }
 
-        /// Converts from a `&StoredShape<_, S>` to an `Option<&S>`.
+        /// Converts from a `&StoredShape<E, S, K>` to an `Option<&S>`.
         #[must_use]
         #[inline]
         pub fn shape_ref(&self) -> Option<&S> {
@@ -2685,16 +2752,16 @@ pub mod stored {
             }
         }
 
-        /// Returns the contained `E::Atom` key, consuming the `self` value.
+        /// Returns the contained `K` key, consuming the `self` value.
         ///
         /// # Panics
         ///
         /// Panics if the contained value was a `Shape`.
         #[inline]
         #[track_caller]
-        pub fn unwrap_key(self) -> E::Atom {
+        pub fn unwrap_key(self) -> K {
             match self {
-                Self::Key(atom) => atom,
+                Self::Key(key) => key,
                 _ => panic!(),
             }
         }
@@ -2703,7 +2770,7 @@ pub mod stored {
         ///
         /// # Panics
         ///
-        /// Panics if the contained value was an `E::Atom`.
+        /// Panics if the contained value was a `K`.
         #[inline]
         #[track_caller]
         pub fn unwrap_shape(self) -> S {
@@ -2714,34 +2781,11 @@ pub mod stored {
         }
     }
 
-    impl<E, S> Resolvable<E::Atom> for StoredShape<E, S>
+    impl<E, S, K> Clone for StoredShape<E, S, K>
     where
         E: Expression,
-        S: Shape<E>,
-    {
-        type Part = S;
-
-        type Output = S;
-
-        type UnresolvedKeys = Result<E::Atom, Infallible>;
-
-        #[inline]
-        fn resolve<F>(self, mut resolver: F) -> Result<Self::Output, Self::UnresolvedKeys>
-        where
-            F: FnMut(&E::Atom) -> Option<Self::Part>,
-        {
-            match self {
-                Self::Key(key) => resolver(&key).ok_or(Ok(key)),
-                Self::Shape(shape) => Ok(shape),
-            }
-        }
-    }
-
-    impl<E, S> Clone for StoredShape<E, S>
-    where
-        E: Expression,
-        E::Atom: Clone,
         S: Clone + Shape<E>,
+        K: Clone,
     {
         #[inline]
         fn clone(&self) -> Self {
@@ -2752,32 +2796,54 @@ pub mod stored {
         }
     }
 
-    impl<E, S> From<StoredShape<E, S>> for Expr<E>
+    impl<E, S, K> From<StoredShape<E, S, K>> for Expr<E>
     where
         E: Expression,
         S: Shape<E>,
+        K: Into<E::Atom>,
     {
         #[inline]
-        fn from(expr: StoredShape<E, S>) -> Self {
+        fn from(expr: StoredShape<E, S, K>) -> Self {
             match expr {
-                StoredShape::Key(key) => Self::Atom(key),
+                StoredShape::Key(key) => Self::Atom(key.into()),
                 StoredShape::Shape(shape) => shape.into(),
             }
         }
     }
 
-    impl<E, S> TryFrom<Expr<E>> for StoredShape<E, S>
+    /// [`StoredShape`] Matcher Error
+    pub enum StoredShapeMatcherError<E, S, K = <E as Expression>::Atom>
     where
         E: Expression,
         S: Shape<E>,
+        K: TryFrom<E::Atom>,
     {
-        type Error = <S as Matcher<E>>::Error;
+        /// Base Shape Error
+        Base(<S as Matcher<E>>::Error),
+
+        /// Invalid Key Error
+        InvalidKey(K::Error),
+    }
+
+    impl<E, S, K> TryFrom<Expr<E>> for StoredShape<E, S, K>
+    where
+        E: Expression,
+        S: Shape<E>,
+        K: TryFrom<E::Atom>,
+    {
+        type Error = StoredShapeMatcherError<E, S, K>;
 
         #[inline]
         fn try_from(expr: Expr<E>) -> Result<Self, Self::Error> {
             match expr {
-                Expr::Atom(key) => Ok(StoredShape::Key(key)),
-                _ => expr.try_into().map(StoredShape::Shape),
+                Expr::Atom(key) => key
+                    .try_into()
+                    .map(StoredShape::Key)
+                    .map_err(StoredShapeMatcherError::InvalidKey),
+                _ => expr
+                    .try_into()
+                    .map(StoredShape::Shape)
+                    .map_err(StoredShapeMatcherError::Base),
             }
         }
     }
@@ -2787,7 +2853,7 @@ pub mod stored {
         E: Expression,
         S: Shape<E>,
     {
-        type Error = <S as Matcher<E>>::Error;
+        type Error = StoredShapeMatcherError<E, S>;
 
         #[inline]
         fn matches_atom(atom: &E::Atom) -> Result<(), Self::Error> {
@@ -2797,7 +2863,7 @@ pub mod stored {
 
         #[inline]
         fn matches_group(group: GroupRef<E>) -> Result<(), Self::Error> {
-            S::matches_group(group)
+            S::matches_group(group).map_err(StoredShapeMatcherError::Base)
         }
     }
 
@@ -2807,6 +2873,29 @@ pub mod stored {
         S: Shape<E>,
     {
     }
+
+    impl<E, S, K> Resolvable<K> for StoredShape<E, S, K>
+    where
+        E: Expression,
+        S: Shape<E>,
+    {
+        type Part = S;
+
+        type Output = S;
+
+        type UnresolvedKeys = Result<K, Infallible>;
+
+        #[inline]
+        fn resolve<F>(self, mut resolver: F) -> Result<Self::Output, Self::UnresolvedKeys>
+        where
+            F: FnMut(&K) -> Option<Self::Part>,
+        {
+            match self {
+                Self::Key(key) => resolver(&key).ok_or(Ok(key)),
+                Self::Shape(shape) => Ok(shape),
+            }
+        }
+    }
 }
 
 /// Utilities
@@ -2814,8 +2903,26 @@ pub mod util {
     use {
         alloc::vec::Vec,
         bitvec::vec::BitVec,
-        core::iter::{from_fn, FromIterator},
+        core::{
+            convert::Infallible,
+            iter::{from_fn, FromIterator, FusedIterator},
+            marker::PhantomData,
+        },
     };
+
+    /// An Infallible Phantom Data Object
+    // FIXME: implement derive traits correctly
+    #[derive(Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    pub struct Nothing<T: ?Sized>(pub Infallible, PhantomData<T>);
+
+    impl<T: ?Sized> Clone for Nothing<T> {
+        #[inline]
+        fn clone(&self) -> Self {
+            Self(self.0, self.1)
+        }
+    }
+
+    impl<T: ?Sized> Copy for Nothing<T> {}
 
     /// Builds a zeroed [`BitVec`] of the specified length.
     #[inline]
@@ -3041,7 +3148,7 @@ pub mod util {
 
     /// Generates an iterator that returns in pairs or returns `Some(None)` if a pair could not be formed.
     #[inline]
-    pub fn by_pairs<T, I>(iter: I) -> impl Iterator<Item = Option<(T, T)>>
+    pub fn by_pairs<T, I>(iter: I) -> impl FusedIterator<Item = Option<(T, T)>>
     where
         I: IntoIterator<Item = T>,
     {

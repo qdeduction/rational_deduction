@@ -22,10 +22,13 @@ maintenance = { status = "actively-developed" }
 # No default features enabled
 default = []
 
-# Atom-Expr Pairs
+# [EXPERIMENTAL] Adds Atom-Expr Pairs
 aep = []
 
-# Parallel Tools
+# [EXPERIMENTAL] Enables Panicking Functions
+panic = []
+
+# [EXPERIMENTAL] Enables Parallel Tools
 parallel = [
     "exprz/rayon",
     "parking_lot",
@@ -39,6 +42,7 @@ stable = [
 # Enables all experimental features
 experimental = [
     "aep",
+    "panic",
     "parallel",
     "serde",
 ]
@@ -50,9 +54,9 @@ all = [
 ]
 
 [dependencies]
-bitvec = { version = "0.22.1", default-features = false, features = ["alloc"] }
-exprz = { git = "https://github.com/qdeduction/exprz", features = ["shape"] }
+bitvec = { version = "0.22.3", default-features = false, features = ["alloc"] }
+exprz = { git = "https://github.com/qdeduction/exprz", features = ["panic", "shape"] }
 parking_lot = { version = "0.11.1", optional = true }
 rayon = { version = "1.5.0", optional = true }
-serde = { version = "1.0.125", optional = true }
+serde = { version = "1.0.126", default-features = false, features = ["derive"], optional = true }
 
