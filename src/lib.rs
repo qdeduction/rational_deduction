@@ -627,14 +627,16 @@ pub mod rule {
     pub mod parallel {
         use {
             super::*,
-            rayon::iter::{FromParallelIterator, IntoParallelIterator, ParallelIterator},
+            crate::util::parallel::ParallelContainer,
+            rayon::iter::{IntoParallelIterator, ParallelIterator},
         };
 
         /// Composes two rules using the ratio monoid multiplication algorithm.
+        #[inline]
         pub fn pair_compose_by<E, T, B, Output, F>(top: T, bot: B, eq: F) -> Output
         where
             E: Expression + Send + Sync,
-            E::Group: Container<E> + FromParallelIterator<E> + IntoParallelIterator<Item = E>,
+            E::Group: Container<E> + ParallelContainer<E>,
             T: Rule<E>,
             B: Rule<E>,
             Output: Rule<E>,
@@ -660,7 +662,7 @@ pub mod rule {
         where
             E: Expression + Send + Sync,
             E::Atom: PartialEq,
-            E::Group: Container<E> + FromParallelIterator<E> + IntoParallelIterator<Item = E>,
+            E::Group: Container<E> + ParallelContainer<E>,
             for<'g> GroupRef<'g, E>: exprz::IndexedParallelGroupReference<E>,
             T: Rule<E>,
             B: Rule<E>,
@@ -674,7 +676,7 @@ pub mod rule {
         pub fn compose_by<E, R, I, F>(rules: I, eq: F) -> R
         where
             E: Expression + Send + Sync,
-            E::Group: Container<E> + FromParallelIterator<E> + IntoParallelIterator<Item = E>,
+            E::Group: Container<E> + ParallelContainer<E>,
             for<'g> GroupRef<'g, E>: exprz::IndexedParallelGroupReference<E>,
             R: Rule<E> + Send + Sync,
             I: IntoParallelIterator<Item = R>,
@@ -691,7 +693,7 @@ pub mod rule {
         where
             E: Expression + Send + Sync,
             E::Atom: PartialEq,
-            E::Group: Container<E> + FromParallelIterator<E> + IntoParallelIterator<Item = E>,
+            E::Group: Container<E> + ParallelContainer<E>,
             for<'g> GroupRef<'g, E>: exprz::IndexedParallelGroupReference<E>,
             R: Rule<E> + Send + Sync,
             I: IntoParallelIterator<Item = R>,
@@ -2681,7 +2683,6 @@ pub mod stored {
     pub enum StoredShape<E, S, K = <E as Expression>::Atom>
     where
         E: Expression,
-        S: Shape<E>,
     {
         /// Key
         Key(K),
@@ -2696,7 +2697,6 @@ pub mod stored {
     impl<E, S, K> StoredShape<E, S, K>
     where
         E: Expression,
-        S: Shape<E>,
     {
         /// Checks if the `StoredShape` is a key.
         #[must_use]
@@ -2784,7 +2784,7 @@ pub mod stored {
     impl<E, S, K> Clone for StoredShape<E, S, K>
     where
         E: Expression,
-        S: Clone + Shape<E>,
+        S: Clone,
         K: Clone,
     {
         #[inline]
@@ -2799,7 +2799,7 @@ pub mod stored {
     impl<E, S, K> From<StoredShape<E, S, K>> for Expr<E>
     where
         E: Expression,
-        S: Shape<E>,
+        S: Into<Expr<E>>,
         K: Into<E::Atom>,
     {
         #[inline]
@@ -2815,7 +2815,7 @@ pub mod stored {
     pub enum StoredShapeMatcherError<E, S, K = <E as Expression>::Atom>
     where
         E: Expression,
-        S: Shape<E>,
+        S: Matcher<E>,
         K: TryFrom<E::Atom>,
     {
         /// Base Shape Error
@@ -2851,7 +2851,7 @@ pub mod stored {
     impl<E, S> Matcher<E> for StoredShape<E, S>
     where
         E: Expression,
-        S: Shape<E>,
+        S: Matcher<E>,
     {
         type Error = StoredShapeMatcherError<E, S>;
 
@@ -2877,7 +2877,6 @@ pub mod stored {
     impl<E, S, K> Resolvable<K> for StoredShape<E, S, K>
     where
         E: Expression,
-        S: Shape<E>,
     {
         type Part = S;
 
@@ -3026,6 +3025,21 @@ pub mod util {
                 IntoParallelRefIterator, ParallelIterator,
             },
         };
+
+        /// Parallel Container Helper Trait
+        pub trait ParallelContainer<T>:
+            FromParallelIterator<T> + IntoParallelIterator<Item = T>
+        where
+            T: Send,
+        {
+        }
+
+        impl<T, C> ParallelContainer<T> for C
+        where
+            T: Send,
+            C: FromParallelIterator<T> + IntoParallelIterator<Item = T>,
+        {
+        }
 
         /// Locked [`BitVec`] Type
         pub type LockedBitVec = RwLock<BitVec>;
