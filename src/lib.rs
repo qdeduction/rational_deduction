@@ -6,8 +6,11 @@
 // TODO:  implement `Deref/Borrow/ToOwned` traits where possible
 
 #![cfg_attr(docsrs, feature(doc_cfg), forbid(broken_intra_doc_links))]
-#![feature(exhaustive_patterns)]
-#![feature(generic_associated_types)]
+#![feature(
+    associated_type_defaults,
+    exhaustive_patterns,
+    generic_associated_types
+)]
 #![allow(incomplete_features)]
 #![forbid(missing_docs)]
 #![forbid(unsafe_code)]
@@ -545,6 +548,7 @@ pub mod aep {
             matches_atom::<E>(atom)
         }
 
+        #[inline]
         fn matches_group(group: GroupRef<E>) -> Result<(), Self::Error> {
             matches_group::<E>(&group)
         }
@@ -1781,7 +1785,7 @@ pub mod substitution {
             E::Atom: Clone + PartialEq,
             E::Group: FromIterator<E>,
         {
-            self.get_owned(&atom)
+            self.get_owned(atom)
                 .unwrap_or_else(move || E::from_atom(atom.clone()))
         }
 
@@ -2131,6 +2135,7 @@ pub mod substitution {
             matches_atom::<E>(atom)
         }
 
+        #[inline]
         fn matches_group(group: GroupRef<E>) -> Result<(), Self::Error> {
             matches_group::<E>(&group)
         }
@@ -2657,6 +2662,512 @@ pub mod substitution {
     }
 }
 
+/// Composition Module
+#[cfg(feature = "composition")]
+#[cfg_attr(docsrs, doc(cfg(feature = "composition")))]
+pub mod composition {
+    use {
+        super::*,
+        alloc::vec::Vec,
+        core::{iter, slice},
+    };
+
+    /// Evaluation Shape
+    #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+    pub enum EvaluationShape<R, C> {
+        /// Rule Shape
+        Rule(R),
+
+        /// Composition Shape
+        Composition(C),
+    }
+
+    /// Stored Rule Reference
+    #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+    pub enum StoredRuleRef<'e, R, K> {
+        /// Rule
+        Rule(&'e R),
+
+        /// Key
+        Key(&'e K),
+    }
+
+    impl<'e, R, K> StoredRuleRef<'e, R, K> {
+        /// Returns an owned [`StoredRule`] value.
+        #[inline]
+        pub fn to_owned(&self) -> StoredRule<R, K>
+        where
+            R: Clone,
+            K: Clone,
+        {
+            match self {
+                Self::Rule(rule) => StoredRule::Rule(Clone::clone(rule)),
+                Self::Key(key) => StoredRule::Key(Clone::clone(key)),
+            }
+        }
+    }
+
+    impl<'e, R, K> From<&'e StoredRule<R, K>> for StoredRuleRef<'e, R, K> {
+        #[inline]
+        fn from(stored: &'e StoredRule<R, K>) -> Self {
+            stored.as_ref()
+        }
+    }
+
+    /// Stored Rule
+    #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+    pub enum StoredRule<R, K> {
+        /// Rule
+        Rule(R),
+
+        /// Key
+        Key(K),
+    }
+
+    impl<R, K> StoredRule<R, K> {
+        /// Returns the [`&StoredRule`](StoredRule) as a [`StoredRuleRef`].
+        #[inline]
+        pub fn as_ref(&self) -> StoredRuleRef<'_, R, K> {
+            match self {
+                Self::Rule(rule) => StoredRuleRef::Rule(rule),
+                Self::Key(key) => StoredRuleRef::Key(key),
+            }
+        }
+    }
+
+    impl<E, R, K> From<StoredRule<R, K>> for Expr<E>
+    where
+        E: Expression,
+        E::Group: Container<E>,
+        R: Rule<E>,
+        K: Into<E::Atom>,
+    {
+        #[inline]
+        fn from(rule: StoredRule<R, K>) -> Self {
+            match rule {
+                StoredRule::Rule(rule) => rule.into().into(),
+                StoredRule::Key(key) => Self::Atom(key.into()),
+            }
+        }
+    }
+
+    impl<E, R, K> TryFrom<Expr<E>> for StoredRule<R, K>
+    where
+        E: Expression,
+        E::Group: Container<E>,
+        R: Rule<E>,
+        K: TryFrom<E::Atom>,
+    {
+        type Error = ();
+
+        #[inline]
+        fn try_from(expr: Expr<E>) -> Result<Self, Self::Error> {
+            if expr.is_atom() {
+                match expr.unwrap_atom().try_into() {
+                    Ok(key) => Ok(Self::Key(key)),
+                    _ => Err(()),
+                }
+            } else {
+                match R::try_from(E::from_expr(expr)) {
+                    Ok(rule) => Ok(Self::Rule(rule)),
+                    _ => Err(()),
+                }
+            }
+        }
+    }
+
+    /// Composition Term Reference Type
+    #[derive(Debug, Eq, PartialEq)]
+    pub struct TermRef<'e, R, S, K> {
+        /// [`StoredRule`] Reference
+        pub rule: StoredRuleRef<'e, R, K>,
+
+        /// [`Substitution`] Reference
+        pub subst: &'e S,
+    }
+
+    impl<'e, R, S, K> TermRef<'e, R, S, K> {
+        /// Builds a new composition term reference.
+        #[inline]
+        pub fn new(rule: StoredRuleRef<'e, R, K>, subst: &'e S) -> Self {
+            Self { rule, subst }
+        }
+
+        /// Returns an owned [`Term`].
+        #[inline]
+        pub fn to_owned(&self) -> Term<R, S, K>
+        where
+            R: Clone,
+            S: Clone,
+            K: Clone,
+        {
+            Term::new(self.rule.to_owned(), self.subst.clone())
+        }
+    }
+
+    impl<'e, R, S, K> From<&'e Term<R, S, K>> for TermRef<'e, R, S, K> {
+        #[inline]
+        fn from(term: &'e Term<R, S, K>) -> Self {
+            term.as_ref()
+        }
+    }
+
+    /// Composition Term Type
+    #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+    pub struct Term<R, S, K> {
+        /// [`StoredRule`] Object
+        pub rule: StoredRule<R, K>,
+
+        /// [`Substitution`] Object
+        pub subst: S,
+    }
+
+    impl<R, S, K> Term<R, S, K> {
+        /// Builds a new composition term.
+        #[inline]
+        pub fn new(rule: StoredRule<R, K>, subst: S) -> Self {
+            Self { rule, subst }
+        }
+
+        /// Returns the [`&Term`](Term) as a [`TermRef`].
+        #[inline]
+        pub fn as_ref(&self) -> TermRef<'_, R, S, K> {
+            TermRef::new(self.rule.as_ref(), &self.subst)
+        }
+
+        #[inline]
+        fn iter<E>(self) -> impl Iterator<Item = E>
+        where
+            E: Expression,
+            E::Group: Container<E>,
+            R: Rule<E>,
+            S: Substitution<E>,
+            K: Into<E::Atom>,
+        {
+            util::two_item_iter(E::from_expr(Into::into(self.rule)), self.subst.into())
+        }
+    }
+
+    impl<E, R, S, K> TryFrom<(E, E)> for Term<R, S, K> {
+        type Error = ();
+
+        #[inline]
+        fn try_from((rule, subst): (E, E)) -> Result<Self, Self::Error> {
+            // TODO: Ok(Self::new(eval.try_into()?, subst.try_into()?))
+            let _ = (rule, subst);
+            todo!()
+        }
+    }
+
+    /// Composition Trait
+    pub trait Composition<E, R, S, K = <E as Expression>::Atom, V = Vec<Term<R, S, K>>>:
+        super::Structure<E, Structure<E, R, S, K, V>>
+    where
+        E: Expression,
+        E::Group: Container<E>,
+        R: Rule<E>,
+        S: Substitution<E>,
+        K: Into<E::Atom>,
+        V: Container<Term<R, S, K>>,
+    {
+        /// Iterator over elements by reference.
+        type Iter<'e>: Iterator<Item = TermRef<'e, R, S, K>>
+        where
+            R: 'e,
+            S: 'e,
+            K: 'e;
+
+        /// Returns an iterator over the elements by reference.
+        fn iter(&self) -> Self::Iter<'_>;
+
+        /// Builds an empty `Composition`.
+        #[inline]
+        fn empty() -> Self
+        where
+            Self: Sized,
+        {
+            Self::from(Structure::from_iter(None))
+        }
+
+        /// Checks if the `Composition` is empty.
+        #[inline]
+        fn is_empty(&self) -> bool {
+            self.iter().next().is_none()
+        }
+
+        /// Evaluates the composition.
+        #[inline]
+        fn flat_resolve<F>(self, resolver: F) -> Result<R, E::Atom>
+        where
+            Self: Sized,
+            F: FnMut(&K) -> Option<R>,
+        {
+            let _ = resolver;
+            todo!()
+        }
+
+        /// Evaluates the composition.
+        #[inline]
+        fn resolve<F>(self, resolver: F) -> Result<R, E::Atom>
+        where
+            Self: Sized,
+            F: FnMut(&K) -> Option<EvaluationShape<R, Self>>,
+        {
+            let _ = resolver;
+            todo!()
+        }
+    }
+
+    /// Composition Structure Type
+    #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+    pub struct Structure<E, R, S, K = <E as Expression>::Atom, V = Vec<Term<R, S, K>>>
+    where
+        E: Expression,
+        E::Group: Container<E>,
+        R: Rule<E>,
+        S: Substitution<E>,
+        V: Container<Term<R, S, K>>,
+    {
+        /// Composition terms
+        pub terms: V,
+
+        /// Phantom Marker
+        __: PhantomData<(E, R, S, K)>,
+    }
+
+    impl<E, R, S, K, V> Structure<E, R, S, K, V>
+    where
+        E: Expression,
+        E::Group: Container<E>,
+        R: Rule<E>,
+        S: Substitution<E>,
+        V: Container<Term<R, S, K>>,
+    {
+        /// Builds a new [`Structure`] from a [`Term`] container.
+        #[inline]
+        pub fn new(terms: V) -> Self {
+            Self {
+                terms,
+                __: PhantomData,
+            }
+        }
+    }
+
+    impl<E, R, S, K, V> Default for Structure<E, R, S, K, V>
+    where
+        E: Expression,
+        E::Group: Container<E>,
+        R: Rule<E>,
+        S: Substitution<E>,
+        V: Container<Term<R, S, K>>,
+    {
+        #[inline]
+        fn default() -> Self {
+            Self::new(V::from_iter(None))
+        }
+    }
+
+    impl<E, R, S, K, V> IntoIterator for Structure<E, R, S, K, V>
+    where
+        E: Expression,
+        E::Group: Container<E>,
+        R: Rule<E>,
+        S: Substitution<E>,
+        V: Container<Term<R, S, K>>,
+    {
+        type Item = Term<R, S, K>;
+
+        type IntoIter = <V as IntoIterator>::IntoIter;
+
+        #[inline]
+        fn into_iter(self) -> Self::IntoIter {
+            self.terms.into_iter()
+        }
+    }
+
+    impl<E, R, S, K, V> FromIterator<Term<R, S, K>> for Structure<E, R, S, K, V>
+    where
+        E: Expression,
+        E::Group: Container<E>,
+        R: Rule<E>,
+        S: Substitution<E>,
+        V: Container<Term<R, S, K>>,
+    {
+        #[inline]
+        fn from_iter<I>(iter: I) -> Self
+        where
+            I: IntoIterator<Item = Term<R, S, K>>,
+        {
+            Self::new(V::from_iter(iter))
+        }
+    }
+
+    impl<E, R, S, K, V> From<Structure<E, R, S, K, V>> for Expr<E>
+    where
+        E: Expression,
+        E::Group: Container<E>,
+        R: Rule<E>,
+        S: Substitution<E>,
+        K: Into<E::Atom>,
+        V: Container<Term<R, S, K>>,
+    {
+        #[inline]
+        fn from(structure: Structure<E, R, S, K, V>) -> Self {
+            Self::Group(structure.into_iter().map(Term::iter).flatten().collect())
+        }
+    }
+
+    /// Composition Shape Error Type
+    #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+    pub enum ShapeError {}
+
+    /// Checks if an atom matches the `Composition` pattern.
+    #[inline]
+    pub fn matches_atom<E>(atom: &E::Atom) -> Result<(), ShapeError>
+    where
+        E: Expression,
+    {
+        // FIXME: implement
+        let _ = atom;
+        todo!()
+    }
+
+    /// Checks if a group matches the `Composition` pattern.
+    #[inline]
+    pub fn matches_group<E>(group: &GroupRef<E>) -> Result<(), ShapeError>
+    where
+        E: Expression,
+    {
+        // FIXME: implement
+        let _ = group;
+        todo!()
+    }
+
+    /// Checks if an expression matches the `Composition` pattern.
+    #[inline]
+    pub fn matches<E>(expr: &ExprRef<E>) -> Result<(), ShapeError>
+    where
+        E: Expression,
+    {
+        match expr {
+            ExprRef::Atom(atom) => matches_atom::<E>(atom),
+            ExprRef::Group(group) => matches_group::<E>(group),
+        }
+    }
+
+    impl<E, R, S, K, V> Matcher<E> for Structure<E, R, S, K, V>
+    where
+        E: Expression,
+        E::Group: Container<E>,
+        R: Rule<E>,
+        S: Substitution<E>,
+        V: Container<Term<R, S, K>>,
+    {
+        type Error = ShapeError;
+
+        #[inline]
+        fn matches_atom(atom: &E::Atom) -> Result<(), Self::Error> {
+            matches_atom::<E>(atom)
+        }
+
+        #[inline]
+        fn matches_group(group: GroupRef<E>) -> Result<(), Self::Error> {
+            matches_group::<E>(&group)
+        }
+    }
+
+    impl<E, R, S, K, V> TryFrom<Expr<E>> for Structure<E, R, S, K, V>
+    where
+        E: Expression,
+        E::Group: Container<E>,
+        R: Rule<E>,
+        S: Substitution<E>,
+        V: Container<Term<R, S, K>>,
+    {
+        type Error = <Structure<E, R, S, K, V> as Matcher<E>>::Error;
+
+        #[inline]
+        fn try_from(expr: Expr<E>) -> Result<Self, Self::Error> {
+            // FIXME: implement
+            let _ = expr;
+            todo!()
+        }
+    }
+
+    impl<E, R, S, K, V> Shape<E> for Structure<E, R, S, K, V>
+    where
+        E: Expression,
+        E::Group: Container<E>,
+        R: Rule<E>,
+        S: Substitution<E>,
+        K: Into<E::Atom>,
+        V: Container<Term<R, S, K>>,
+    {
+    }
+
+    /// Structure Vector Reference Iterator
+    #[derive(Clone)]
+    pub struct StructureVecIter<'s, R, S, K>(slice::Iter<'s, Term<R, S, K>>);
+
+    impl<R, S, K> AsRef<[Term<R, S, K>]> for StructureVecIter<'_, R, S, K> {
+        #[inline]
+        fn as_ref(&self) -> &[Term<R, S, K>] {
+            self.0.as_ref()
+        }
+    }
+
+    impl<'s, R, S, K> DoubleEndedIterator for StructureVecIter<'s, R, S, K> {
+        #[inline]
+        fn next_back(&mut self) -> Option<TermRef<'s, R, S, K>> {
+            self.0.next_back().map(Term::as_ref)
+        }
+    }
+
+    impl<R, S, K> ExactSizeIterator for StructureVecIter<'_, R, S, K> {}
+
+    impl<R, S, K> iter::FusedIterator for StructureVecIter<'_, R, S, K> {}
+
+    impl<'s, R, S, K> Iterator for StructureVecIter<'s, R, S, K> {
+        type Item = TermRef<'s, R, S, K>;
+
+        #[inline]
+        fn next(&mut self) -> Option<Self::Item> {
+            self.0.next().map(Term::as_ref)
+        }
+
+        #[inline]
+        fn size_hint(&self) -> (usize, Option<usize>) {
+            self.0.size_hint()
+        }
+
+        #[inline]
+        fn count(self) -> usize {
+            self.0.count()
+        }
+    }
+
+    impl<E, R, S, K> Composition<E, R, S, K> for Structure<E, R, S, K>
+    where
+        E: Expression,
+        E::Group: Container<E>,
+        R: Rule<E>,
+        S: Substitution<E>,
+        K: Into<E::Atom>,
+    {
+        type Iter<'e>
+        where
+            R: 'e,
+            S: 'e,
+            K: 'e,
+        = StructureVecIter<'e, R, S, K>;
+
+        #[inline]
+        fn iter(&self) -> Self::Iter<'_> {
+            StructureVecIter(self.terms.iter())
+        }
+    }
+}
+
 /// Stored Objects Module
 pub mod stored {
     use super::*;
@@ -2676,6 +3187,71 @@ pub mod stored {
         fn resolve<F>(self, resolver: F) -> Result<Self::Output, Self::UnresolvedKeys>
         where
             F: FnMut(&K) -> Option<Self::Part>;
+    }
+
+    /// Stored Object
+    #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+    pub enum Stored<K, V> {
+        /// Key
+        Key(K),
+
+        /// Value
+        Value(V),
+    }
+
+    impl<K, V> Stored<K, V> {
+        /// Returns the [`&Stored`](Stored) as a [`StoredRef`].
+        #[inline]
+        pub fn as_ref(&self) -> StoredRef<'_, K, V> {
+            match self {
+                Self::Key(key) => StoredRef::Key(key),
+                Self::Value(value) => StoredRef::Value(value),
+            }
+        }
+    }
+
+    impl<K, V> Resolvable<K> for Stored<K, V> {
+        type Part = V;
+
+        type Output = V;
+
+        type UnresolvedKeys = Result<K, Infallible>;
+
+        #[inline]
+        fn resolve<F>(self, mut resolver: F) -> Result<Self::Output, Self::UnresolvedKeys>
+        where
+            F: FnMut(&K) -> Option<Self::Part>,
+        {
+            match self {
+                Self::Key(key) => resolver(&key).ok_or(Ok(key)),
+                Self::Value(value) => Ok(value),
+            }
+        }
+    }
+
+    /// Stored Reference
+    pub type StoredRef<'r, K, V> = Stored<&'r K, &'r V>;
+
+    impl<'r, K, V> StoredRef<'r, K, V> {
+        /// Returns an owned [`Stored`] value.
+        #[inline]
+        pub fn to_owned(&self) -> Stored<K, V>
+        where
+            K: Clone,
+            V: Clone,
+        {
+            match self {
+                Self::Key(key) => Stored::Key(Clone::clone(key)),
+                Self::Value(value) => Stored::Value(Clone::clone(value)),
+            }
+        }
+    }
+
+    impl<'r, K, V> From<&'r Stored<K, V>> for StoredRef<'r, K, V> {
+        #[inline]
+        fn from(stored: &'r Stored<K, V>) -> Self {
+            stored.as_ref()
+        }
     }
 
     /// Stored Shape Type
@@ -2945,7 +3521,7 @@ pub mod util {
     {
         haystack
             .enumerate()
-            .position(move |(i, elem)| eq(&needle, elem) && !matches[i])
+            .position(move |(i, elem)| eq(needle, elem) && !matches[i])
     }
 
     /// Looks for the first new match of the `needle` in the `haystack` and updates the `matches`.
@@ -3059,7 +3635,7 @@ pub mod util {
         {
             haystack
                 .enumerate()
-                .position_first(move |(i, elem)| eq(&needle, elem) && !matches.read()[i])
+                .position_first(move |(i, elem)| eq(needle, elem) && !matches.read()[i])
         }
 
         /// Looks for the first new match of the `needle` in the `haystack` and updates the `matches`.
